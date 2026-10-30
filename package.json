@@ -1,0 +1,76 @@
+{
+  "name": "@nestor-home/satellite",
+  "version": "0.0.1",
+  "description": "TypeScript SDK to write Nestor satellites, in browsers and in Node: pairing, WebRTC audio and the nestor data channel.",
+  "keywords": [
+    "nestor",
+    "satellite",
+    "voice assistant",
+    "webrtc",
+    "home automation"
+  ],
+  "homepage": "https://nestor.mathislambert.fr",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nestor-home/nestor-satellite-typescript.git"
+  },
+  "bugs": "https://github.com/nestor-home/nestor-satellite-typescript/issues",
+  "license": "MIT",
+  "author": "Mathis Lambert",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
+    },
+    "./schemas/*": "./schemas/*",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "nestor-satellite": "./dist/node/cli.js"
+  },
+  "files": [
+    "dist",
+    "schemas"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/node/cli.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "conformance": "pnpm build && vitest run --config vitest.conformance.config.ts",
+    "package:check": "pnpm build && publint --strict && attw --pack . --profile esm-only",
+    "example": "vite --config examples/browser/vite.config.ts"
+  },
+  "peerDependencies": {
+    "@roamhq/wrtc": "^0.10.0"
+  },
+  "peerDependenciesMeta": {
+    "@roamhq/wrtc": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@biomejs/biome": "2.6.4",
+    "@roamhq/wrtc": "0.10.0",
+    "@types/node": "22.20.5",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "playwright-core": "1.64.1",
+    "publint": "0.3.25",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}
