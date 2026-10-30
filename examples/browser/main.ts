@@ -1,16 +1,19 @@
+/// <reference types="vite/client" />
+
 /**
- * A browser tab as a Nestor satellite: microphone and speaker, the device code on screen (and aloud,
- * if asked), an enrollment code typed in the page or passed in the address, intents logged.
+ * A browser tab as a Nestor satellite: microphone and speaker, the device code on screen (and aloud
+ * with the bundled voice, if asked), an enrollment code typed in the page, scanned with the camera
+ * (if asked) or passed in the address, intents logged.
  *
  * Address parameters: `?auto&room=salon&id=tab` starts at once (tests; browsers then need autoplay
  * allowed), `pairing_uri=nestor+http://…/?code=…` pairs with that enrollment code, `lang=fr` picks
- * the language, `core=http://…` talks to another core than this page's origin.
+ * the language, `speak` says the code aloud, `qr` scans QR codes, `core=http://…` talks to another
+ * core than this page's origin.
  */
 
 import {
   AUDIO_CAPTURE,
   AUDIO_PLAYBACK,
-  browserSpeech,
   browserWebRtc,
   IDENTIFY,
   LocalStorageTokenStore,
@@ -18,6 +21,9 @@ import {
   Manifest,
   Satellite,
 } from "@nestor-home/satellite";
+import { cameraQrScanner } from "@nestor-home/satellite/qr";
+// Served by this page, so QR codes are read offline (by default zxing-wasm fetches it from a CDN).
+import wasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const form = $<HTMLFormElement>("form");
@@ -38,9 +44,10 @@ interface Start {
   id: string;
   enrollment: string | undefined;
   speak: boolean;
+  qr: boolean;
 }
 
-function start({ room, id, enrollment, speak }: Start): void {
+function start({ room, id, enrollment, speak, qr }: Start): void {
   form.hidden = true;
   status.textContent = "Connecting…";
   const locale = params.get("lang") ?? navigator.languages;
@@ -60,9 +67,11 @@ function start({ room, id, enrollment, speak }: Start): void {
         enrollForm.hidden = shown === null;
         status.textContent = text;
       },
-      // device_code.speech, when asked for and when this browser can speak.
-      speak: speak ? browserSpeech({ lang: typeof locale === "string" ? locale : (locale[0] ?? "en") }) : undefined,
+      // device_code.speech, when asked for: the bundled voice, through Web Audio.
+      voice: speak,
       accepts: ["enrollment.input"],
+      // enrollment.qr, when asked for: the camera reads the pairing URI's QR code while the tab waits.
+      scanner: qr ? cameraQrScanner({ wasmUrl }) : undefined,
     },
     body: {
       behavior: (behavior) => log(`behavior ${behavior}`),
@@ -105,6 +114,7 @@ form.addEventListener("submit", (event) => {
     id: String(data.get("id")),
     enrollment: enrollment === "" ? undefined : enrollment,
     speak: data.has("speak"),
+    qr: data.has("qr"),
   });
 });
 
@@ -114,5 +124,6 @@ if (params.has("auto")) {
     id: params.get("id") ?? "navigateur",
     enrollment: params.get("pairing_uri") ?? undefined,
     speak: params.has("speak"),
+    qr: params.has("qr"),
   });
 }

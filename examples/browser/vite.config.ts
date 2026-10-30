@@ -8,9 +8,13 @@ const core = process.env.NESTOR_CORE ?? "http://localhost:7860";
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   resolve: {
-    alias: { "@nestor-home/satellite": fileURLToPath(new URL("../../src/index.ts", import.meta.url)) },
+    alias: {
+      "@nestor-home/satellite/qr": fileURLToPath(new URL("../../src/qr/index.ts", import.meta.url)),
+      "@nestor-home/satellite": fileURLToPath(new URL("../../src/index.ts", import.meta.url)),
+    },
   },
   server: { proxy: { "/satellites": { target: core, changeOrigin: true } } },
   // Bundled when the server starts rather than discovered on the first page load (which reloads it).
-  optimizeDeps: { include: ["@fluent/bundle"] },
+  // zxing-wasm stays out: it finds its WebAssembly next to itself.
+  optimizeDeps: { include: ["@fluent/bundle"], exclude: ["zxing-wasm"] },
 });

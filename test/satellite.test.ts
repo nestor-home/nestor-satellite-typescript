@@ -14,12 +14,15 @@ import {
   PairingError,
   PERSON_DETECTION,
   ProtocolError,
+  pairingMethods,
+  type QrScanner,
   Satellite,
   type SatelliteOptions,
   SPEECH_ACTIVITY,
   type WebRtc,
 } from "../src/index.js";
 import { FakeCore, message, until, welcome } from "./support/core.js";
+import { RecordingSpeaker } from "./support/voice.js";
 import { type CoreSession, FakeWebRtc } from "./support/webrtc.js";
 
 const DEVICE = { id: "capteur-entree", model: "esp32", room: "entree" };
@@ -241,11 +244,83 @@ describe("pairing", () => {
         ...(pairing === undefined ? {} : { pairing }),
       }).manifest.pairingMethods;
     expect(methods(undefined)).toEqual(["enrollment.provisioning"]);
-    expect(methods({ speak: () => {}, accepts: ["enrollment.qr", "enrollment.input"] })).toEqual([
+    const scanner: QrScanner = { scan: async () => {} };
+    expect(methods({ speak: () => {}, accepts: ["enrollment.input"], scanner })).toEqual([
       "device_code.speech",
       "enrollment.input",
       "enrollment.provisioning",
       "enrollment.qr",
+    ]);
+  });
+
+  it("declares enrollment.qr only with a scanner, never from accepts alone", () => {
+    const accepts = ["enrollment.qr"] as unknown as "enrollment.input"[];
+    expect(() => pairingMethods({ accepts })).toThrow(/pairing.scanner/);
+    expect(pairingMethods({ accepts: ["enrollment.input"] })).not.toContain("enrollment.qr");
+  });
+
+  it("pairs with an enrollment code read from a QR code while it waits, then closes the camera", async () => {
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc, codes: { K7QF2M9X: "valid" }, pendingPolls: Number.POSITIVE_INFINITY });
+    let closed = false;
+    const seen: string[] = [];
+    const scanner: QrScanner = {
+      scan: (found, signal) =>
+        new Promise((resolve) => {
+          const frames = ["https://example.com/menu", `nestor+${core.url}/?code=K7QF2M9X`];
+          const timer = setInterval(() => {
+            const text = frames.shift() ?? `nestor+${core.url}/?code=K7QF2M9X`; // seen in every frame
+            seen.push(text);
+            found(text);
+          }, 5);
+          signal.addEventListener("abort", () => {
+            clearInterval(timer);
+            closed = true;
+            resolve();
+          });
+        }),
+    };
+    const { satellite } = await start([], { pairing: { scanner, pollMs: 5 } }, core);
+    expect(satellite.manifest.pairingMethods).toContain("enrollment.qr");
+    await greet(await core.sessions.next(), []);
+    expect(core.enrollments).toEqual([{ enrollment_code: "K7QF2M9X", method: "enrollment.qr" }]);
+    expect(closed).toBe(true);
+    const scanned = seen.length;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(seen).toHaveLength(scanned);
+  });
+
+  it("still pairs with its device code when the camera does not open, and says why", async () => {
+    const warn = vi.fn();
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc });
+    const scanner: QrScanner = { scan: () => Promise.reject(new Error("NotAllowedError")) };
+    await start([], { pairing: { scanner, pollMs: 5 }, logger: { ...silent, warn }, locale: "en" }, core);
+    await greet(await core.sessions.next(), []);
+    expect(warn).toHaveBeenCalledWith(
+      "The camera did not open, so this device cannot scan a QR code (NotAllowedError).",
+    );
+  });
+
+  it("never sends an enrollment code refused before it restarted, even once its token is refused", async () => {
+    const tokens = new MemoryTokenStore();
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc, codes: { K7QF2M9X: "used" } });
+    const pairing = { enrollment: `nestor+${core.url}/?code=K7QF2M9X`, pollMs: 5 };
+    const options = { core: core.url, manifest: Manifest.of(DEVICE), tokens, webrtc, pairing, logger: silent };
+    const stopping = new AbortController();
+    const first = new Satellite(options).run(stopping.signal);
+    await greet(await core.sessions.next(), []);
+    stopping.abort();
+    await first;
+    core.revoke(DEVICE.id); // at the next start, the token is refused and forgotten
+    await start([], { ...options, backoffMs: [5, 20] }, core);
+    await greet(await core.sessions.next(), []);
+    expect(core.pairRequests.map((r) => r.enrollment_code)).toEqual(["K7QF2M9X", undefined, undefined]);
+    expect(core.offers.map((o) => o.authorization)).toEqual([
+      "Bearer nst2_token-1",
+      "Bearer nst2_token-1",
+      "Bearer nst2_token-2",
     ]);
   });
 
@@ -368,4 +443,58 @@ it("counts audio from the core as a heartbeat", async () => {
   const session = await core.sessions.next();
   session.audio();
   expect(heartbeat).toHaveBeenCalled();
+});
+
+describe("the device code said aloud", () => {
+  const satellite = (capabilities: string[], options: Partial<SatelliteOptions> = {}, speaker?: RecordingSpeaker) =>
+    new Satellite({
+      core: "http://c",
+      manifest: Manifest.of(DEVICE, ...capabilities),
+      tokens: new MemoryTokenStore(),
+      webrtc: new FakeWebRtc(speaker),
+      ...options,
+    });
+
+  it("is declared for a device with a speaker and no screen, and said with the bundled voice", async () => {
+    const speaker = new RecordingSpeaker();
+    const webrtc = new FakeWebRtc(speaker);
+    const core = await FakeCore.start({ webrtc, pendingPolls: Number.POSITIVE_INFINITY });
+    const { satellite: s } = await start([AUDIO_PLAYBACK], { webrtc, pairing: { pollMs: 5 } }, core);
+    expect(s.manifest.pairingMethods).toEqual(["device_code.speech", "enrollment.provisioning"]);
+    await until(() => speaker.samples > 0);
+    core.approve();
+    await greet(await core.sessions.next(), []);
+    const said = speaker.samples;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(speaker.samples).toBe(said);
+  });
+
+  it("is not declared without a speaker, nor without audio.playback", () => {
+    expect(satellite([AUDIO_PLAYBACK]).manifest.pairingMethods).toEqual(["enrollment.provisioning"]);
+    expect(satellite([], {}, new RecordingSpeaker()).manifest.pairingMethods).toEqual(["enrollment.provisioning"]);
+    expect(() => satellite([], { pairing: { voice: true } }, new RecordingSpeaker())).toThrow(/audio.playback/);
+  });
+
+  it("is left to the screen when there is one, unless asked for", () => {
+    const display = () => {};
+    const speaker = new RecordingSpeaker();
+    expect(satellite([AUDIO_PLAYBACK], { pairing: { display } }, speaker).manifest.pairingMethods).toEqual([
+      "device_code.display",
+      "enrollment.provisioning",
+    ]);
+    expect(satellite([AUDIO_PLAYBACK], { pairing: { display, voice: true } }, speaker).manifest.pairingMethods).toEqual(
+      ["device_code.display", "device_code.speech", "enrollment.provisioning"],
+    );
+  });
+
+  it("goes through the driver's own voice when it has one", async () => {
+    const speaker = new RecordingSpeaker();
+    const said: string[] = [];
+    const webrtc = new FakeWebRtc(speaker);
+    const core = await FakeCore.start({ webrtc });
+    await start([AUDIO_PLAYBACK], { webrtc, pairing: { speak: (text) => said.push(text), pollMs: 5 } }, core);
+    await greet(await core.sessions.next(), []);
+    expect(said).toEqual(["Pairing code: 0, 4, 2, 1, 3, 7. I repeat: 0, 4, 2, 1, 3, 7."]);
+    expect(speaker.samples).toBe(0);
+  });
 });

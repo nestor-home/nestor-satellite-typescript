@@ -24,16 +24,19 @@ src/              the core: runs anywhere, imports no platform API
 ├── wire.ts       the JSON envelope and the pairing bodies: what the satellite sends, strict parsing of the core's
 ├── dispatch.ts   intents to the Body (identify included), acks, welcome, hang-up
 ├── body.ts       Body: what a driver implements to carry out intents
-├── pairing.ts    Pairing: enrollment code or device code, enroll while pending, refusals, 429 (fetch)
+├── pairing.ts    Pairing: enrollment code or device code, enroll while pending, refusals (kept hashed), 429 (fetch)
+├── voice.ts      the bundled voice: the sentence as clips, WAV decoding, SpokenCode over the Speaker port
 ├── i18n.ts       Messages: every sentence for people, through Fluent; locales.ts holds en and fr
-├── tokens.ts     TokenStore, MemoryTokenStore, LocalStorageTokenStore
+├── tokens.ts     TokenStore (token and refused codes' hashes), MemoryTokenStore, LocalStorageTokenStore
 ├── webrtc.ts     the WebRtc / Peer port
 ├── w3c.ts        W3cPeer: a Peer over any standard RTCPeerConnection
-├── browser.ts    browserWebRtc: getUserMedia and an <audio> element
-├── satellite.ts  Satellite: pairing, connection, hello/welcome, observations, reconnection
-└── node/         @nestor-home/satellite/node: @roamhq/wrtc, PCM audio, FileTokenStore, env.ts
-                  (NESTOR_PAIRING_URI, NESTOR_PAIRING_CODE, LANG), the CLI
+├── browser.ts    browserWebRtc: getUserMedia, an <audio> element, webAudioSpeaker (the bundled voice)
+├── satellite.ts  Satellite: pairing, connection, hello/welcome, observations, reconnection, QrScanner port
+├── node/         @nestor-home/satellite/node: @roamhq/wrtc, PCM audio (and sinkSpeaker), FileTokenStore,
+│                 env.ts (NESTOR_PAIRING_URI, NESTOR_PAIRING_CODE, LANG), the CLI
+└── qr/           @nestor-home/satellite/qr: cameraQrScanner, browsers only (zxing-wasm, optional peer)
 schemas/          JSON Schemas copied from the server (do not edit by hand)
+voice/            the bundled voice's clips, copied from nestor-satellite-python (do not edit by hand)
 examples/browser/ a tab as a satellite (Vite)
 scripts/          conformance.py (the server's suite on any command), browser-satellite.mjs
 test/             behaviour tests against a fake core (local HTTP, in-process WebRTC)
@@ -61,15 +64,23 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
 5. **The network loop never waits for the device.** `Body` methods return at once; a failing body is
    logged, never allowed to break the link. Physical safety lives in the driver.
 6. **Capabilities are honest.** A declared capability whose device cannot open fails clearly at
-   `run`; observations need their capability declared and allowed.
+   `run`; observations need their capability declared and allowed. `enrollment.qr` needs a
+   `scanner` that really decodes camera frames: Node has none, so it never declares it.
 7. **Secrets:** the token file is mode 600; a refused token is forgotten. No secret in the repo.
 8. **Pairing never fails silently.** The device code always reaches the log (at warning level, so the
-   default logger shows it); a refused enrollment code is said, translated, and never sent again; a
-   `429` is waited out; a core that will never pair the device rejects `run` with a `PairingError`.
-   Pairing methods are derived from the outputs a driver provides, never declared by hand.
+   default logger shows it); a refused enrollment code is said, translated, and never sent again,
+   even after a restart (its SHA-256 hash, never the code, is kept in the `TokenStore`, in the Python
+   SDK's JSON format); a `429` is waited out; a core that will never pair the device rejects `run`
+   with a `PairingError`. Pairing methods are derived from the outputs a driver provides, never
+   declared by hand: a speaker without a screen says the code with the bundled voice.
 9. **People read translated sentences.** Anything shown, said or logged for a person goes through
    `Messages` (`src/locales.ts`, Fluent): add every message to every locale (`test/i18n.test.ts`),
    short and natural, no em-dash. The core's `detail` is English for logs, never shown to people.
+10. **The bundled voice is shared.** `voice/` is a copy of
+    `../nestor-satellite-python/src/nestor_satellite/voice/` (`test/voice.test.ts` fails when they
+    drift; refresh with `cp -R ../nestor-satellite-python/src/nestor_satellite/voice/. voice/`). The
+    sentence is `device-code-speech`; cutting it into clips follows the Python SDK's algorithm
+    exactly. Changing that sentence means recording its clips again (`scripts/voice.py` there).
 
 ## Code conventions
 

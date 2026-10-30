@@ -5,8 +5,8 @@
  *     NESTOR_PAIRING_URI=nestor+http://nestor.local:7860/?code=K7QF2M9X nestor-satellite run --room salon
  *
  * With an enrollment code (`--pairing-uri`, `--pairing-code`, or the same in `NESTOR_PAIRING_URI`,
- * `NESTOR_PAIRING_CODE`), the first run pairs at once; without one, it logs a device code to type in
- * Nestor. The token is then kept in `~/.config/nestor-satellite/<id>.json`. Audio goes through a recorder and a player command
+ * `NESTOR_PAIRING_CODE`), the first run pairs at once; without one, it says a device code to type in
+ * Nestor on its speaker (the bundled voice) and logs it. The token is then kept in `~/.config/nestor-satellite/<id>.json`. Audio goes through a recorder and a player command
  * (`arecord`/`aplay` on Linux, SoX's `rec`/`play` on macOS) exchanging raw 48 kHz s16le mono PCM.
  */
 
@@ -39,7 +39,7 @@ Options:
   --pairing-uri <uri>   pair with this pairing URI, made in Nestor when adding a satellite:
                         nestor+http://host:port/?code=K7QF2M9X (default: $${PAIRING_URI_ENV})
   --pairing-code <code> pair with this enrollment code, K7QF-2M9X (default: $${PAIRING_CODE_ENV})
-                        without either, the satellite logs a device code to type in Nestor
+                        without either, the satellite says and logs a device code to type in Nestor
   --id <slug>           this device's id (default: the host name)
   --model <text>        this device's model (default: node-satellite)
   --brand <slug>        its maker, optional
@@ -144,7 +144,8 @@ export function build(args: Arguments, logger: Logger): Satellite {
     manifest,
     tokens: new FileTokenStore(args.tokenFile),
     webrtc: nodeWebRtc({ source, sink, logger }),
-    // No screen and no voice: the device code goes to the log, with how to pair with an enrollment code.
+    // No screen: the device code is said on the speaker with the bundled voice (unless --output none)
+    // and logged. No camera either, so no enrollment.qr.
     pairing: { enrollment: args.enrollment },
     locale: args.locale,
     iceServers: args.ice,

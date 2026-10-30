@@ -66,7 +66,8 @@ describe("nestor-satellite run", () => {
       quiet,
     );
     expect([...satellite.manifest.names]).toEqual(["audio.capture", "audio.playback"]);
-    expect(satellite.manifest.pairingMethods).toEqual(["enrollment.provisioning"]);
+    // A speaker and no screen: the device code is said with the bundled voice.
+    expect(satellite.manifest.pairingMethods).toEqual(["device_code.speech", "enrollment.provisioning"]);
     expect(satellite.core).toBe("http://c");
     expect(() => build(parse(["run", "--core", "http://c", "--room", "Le Salon"], NO_ENV) as never, quiet)).toThrow(
       /room/,
@@ -121,8 +122,9 @@ describe("pairing from the command line or the environment", () => {
   });
 
   it("sends the configured code with its first request", () => {
-    const satellite = build(run(["--pairing-uri", URI, "--input", "none"]), quiet);
+    const satellite = build(run(["--pairing-uri", URI, "--input", "none", "--output", "none"]), quiet);
     expect(satellite.core).toBe("http://nestor.local:7860");
+    // No speaker: nothing to say the device code with, should the enrollment code be refused.
     expect(satellite.manifest.pairingMethods).toEqual(["enrollment.provisioning"]);
   });
 

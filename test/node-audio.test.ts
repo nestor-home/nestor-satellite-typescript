@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { CommandSink, CommandSource, RecordingSink, SilenceSource } from "../src/node/index.js";
+import { Messages, SpokenCode } from "../src/index.js";
+import {
+  CommandSink,
+  CommandSource,
+  DiscardSink,
+  nodeWebRtc,
+  RecordingSink,
+  SilenceSource,
+} from "../src/node/index.js";
 
 const node = JSON.stringify(process.execPath);
 
@@ -53,4 +61,24 @@ it("silence comes in 20 ms chunks at the source's rate; a recording keeps what i
   sink.write(new Int16Array(3));
   sink.write(new Int16Array(4));
   expect(sink.samples).toBe(7);
+});
+
+describe("the bundled voice in Node", () => {
+  it("plays on the sink the core's voice plays on, at its rate, from the package's clips", async () => {
+    const sink = new RecordingSink(48_000);
+    const speaker = nodeWebRtc({ sink }).speaker;
+    expect(speaker?.sampleRate).toBe(48_000);
+    if (speaker === undefined) return;
+    const clock = { now: () => 0, sleep: async () => {} }; // no waiting: the test is about what is played
+    const voice = new SpokenCode(speaker, new Messages("en"), { clock });
+    voice.say("042137");
+    await voice.finished();
+    expect(sink.samples).toBeGreaterThan(48_000 * 8); // about ten seconds
+    expect(Math.max(...sink.chunks.map((chunk) => Math.max(...chunk.map(Math.abs))))).toBeGreaterThan(1000);
+  });
+
+  it("is not there without a speaker, or when the core's voice is dropped", () => {
+    expect(nodeWebRtc({}).speaker).toBeUndefined();
+    expect(nodeWebRtc({ sink: new DiscardSink() }).speaker).toBeUndefined();
+  });
 });

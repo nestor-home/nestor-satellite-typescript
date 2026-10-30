@@ -1,16 +1,24 @@
 /** Pairing against a fake core: device codes, enrollment codes, refusals, rate limits, identify. */
 
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HttpError,
+  hashEnrollmentCode,
   type Logger,
   Manifest,
+  MemoryTokenStore,
   Messages,
   Pairing,
   PairingError,
   type PairingOptions,
+  SpokenCode,
 } from "../src/index.js";
+import { FileTokenStore } from "../src/node/tokens.js";
 import { FakeCore, until } from "./support/core.js";
+import { RecordingSpeaker } from "./support/voice.js";
 
 const MANIFEST = Manifest.of({ id: "enceinte-salon", model: "raspberry-pi-4", room: "salon" }, "audio.capture");
 const CODE = "K7QF2M9X";
@@ -57,7 +65,7 @@ describe("with no enrollment code", () => {
       ["042137", "Type this code in Nestor to add this device."],
       [null, "Paired with Nestor."],
     ]);
-    expect(s.said).toEqual(["My pairing code is 0, 4, 2, 1, 3, 7. Again: 0, 4, 2, 1, 3, 7."]);
+    expect(s.said).toEqual(["Pairing code: 0, 4, 2, 1, 3, 7. I repeat: 0, 4, 2, 1, 3, 7."]);
     expect(s.logs).toContain("Pairing code: 042137. Type it in Nestor to add this device.");
     expect(s.logs.join("\n")).not.toMatch(/NESTOR_PAIRING_URI/);
   });
@@ -75,8 +83,42 @@ describe("with no enrollment code", () => {
     const s = seen();
     const speak = (text: string) => void s.said.push(text);
     await pairing({ seen: s, outputs: { speak }, messages: new Messages("fr-FR") }).run();
-    expect(s.said).toEqual(["Mon code d'appairage est 0, 4, 2, 1, 3, 7. Je répète : 0, 4, 2, 1, 3, 7."]);
+    expect(s.said).toEqual(["Code d'appairage : 0, 4, 2, 1, 3, 7. Je répète : 0, 4, 2, 1, 3, 7."]);
     expect(s.logs).toContain("Code d'appairage : 042137. Saisissez-le dans Nestor pour ajouter cet appareil.");
+  });
+
+  it("says its code with the bundled voice, and falls silent the moment it is paired", async () => {
+    core = await FakeCore.start({ pendingPolls: Number.POSITIVE_INFINITY });
+    const speaker = new RecordingSpeaker();
+    const voice = new SpokenCode(speaker, new Messages("en"));
+    const s = seen();
+    const pairs = pairing({ seen: s, outputs: { voice } });
+    const running = pairs.run();
+    await until(() => speaker.samples > 16_000 / 2); // half a second said, of about ten
+    core.approve();
+    await running;
+    expect(voice.speaking).toBe(false);
+    const said = speaker.samples;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(speaker.samples).toBe(said);
+    expect(said).toBeLessThan(16_000 * 3);
+    expect(s.logs.join("\n")).not.toMatch(/NESTOR_PAIRING_URI/);
+  });
+
+  it("stops saying its code when pairing is cancelled or fails", async () => {
+    core = await FakeCore.start({ pendingPolls: Number.POSITIVE_INFINITY });
+    const speaker = new RecordingSpeaker();
+    const voice = new SpokenCode(speaker, new Messages("en"));
+    const stopping = new AbortController();
+    const running = pairing({ outputs: { voice }, pollMs: 5 }).run(stopping.signal);
+    await until(() => speaker.samples > 0);
+    stopping.abort(new Error("stopped"));
+    await expect(running).rejects.toThrow("stopped");
+    expect(voice.speaking).toBe(false);
+    core.failWith = 503;
+    const failing = pairing({ outputs: { voice }, pollMs: 5 }).run();
+    await expect(failing).rejects.toBeInstanceOf(HttpError);
+    expect(voice.speaking).toBe(false);
   });
 
   it("asks again with a new device code when one expires", async () => {
@@ -157,6 +199,63 @@ describe("with an enrollment code", () => {
   });
 });
 
+describe("a refused enrollment code, kept by the device", () => {
+  it("is kept as a hash, never in clear, and the token file keeps the Python SDK's format", async () => {
+    core = await FakeCore.start({ codes: { [CODE]: "used" } });
+    const path = join(await mkdtemp(join(tmpdir(), "nestor-")), "state.json");
+    const store = new FileTokenStore(path);
+    await pairing({ enrollment: CODE, store }).run();
+    await store.save(core.url, MANIFEST.device.id, "nst2_token-1");
+    const text = await readFile(path, "utf8");
+    expect(text).not.toMatch(/K7QF-?2M9X/i);
+    expect(JSON.parse(text)).toEqual({
+      core: core.url,
+      device_id: MANIFEST.device.id,
+      token: "nst2_token-1",
+      refused: { [await hashEnrollmentCode(CODE)]: "used" },
+    });
+  });
+
+  it("is never sent again after a restart: the device says so and asks for a device code", async () => {
+    core = await FakeCore.start({ codes: { [CODE]: "expired" } });
+    const store = new FileTokenStore(join(await mkdtemp(join(tmpdir(), "nestor-")), "state.json"));
+    await pairing({ enrollment: URI(core), store }).run();
+    expect(core.pairRequests.map((r) => r.enrollment_code)).toEqual([CODE, undefined]);
+    const s = seen();
+    const display = (code: string | null, text: string) => void s.shown.push([code, text]);
+    const restarted = pairing({ seen: s, enrollment: URI(core), store, outputs: { display } });
+    await restarted.run();
+    expect(core.pairRequests.map((r) => r.enrollment_code)).toEqual([CODE, undefined, undefined]);
+    const refusal = "The enrollment code K7QF-2M9X was already refused. Make a new one in Nestor.";
+    expect(s.logs).toContain(`${refusal} Asking for a pairing code instead.`);
+    expect(s.shown[0]).toEqual([null, refusal]);
+    await expect(restarted.enroll("k7qf-2m9x")).resolves.toEqual({ status: "refused", reason: "expired" });
+  });
+
+  it("stays refused once the token is forgotten", async () => {
+    const store = new MemoryTokenStore();
+    const hash = await hashEnrollmentCode(CODE);
+    store.refuse("http://c", "salon", hash, "used");
+    store.save("http://c", "salon", "nst2_x");
+    store.forget();
+    expect(store.load("http://c", "salon")).toBeNull();
+    expect(store.refused("http://c", "salon")).toEqual({ [hash]: "used" });
+  });
+
+  it("still pairs when the store cannot keep it", async () => {
+    core = await FakeCore.start({ codes: { [CODE]: "used" } });
+    const s = seen();
+    const broken = {
+      refused: () => Promise.reject(new Error("disk unreadable")),
+      refuse: () => Promise.reject(new Error("disk full")),
+    };
+    await expect(pairing({ seen: s, enrollment: CODE, store: broken }).run()).resolves.toMatchObject({
+      token: "nst2_token-1",
+    });
+    expect(s.logs.join("\n")).toMatch(/disk unreadable[\s\S]*disk full/);
+  });
+});
+
 describe("an enrollment code handed in while it waits", () => {
   it("is sent at once with how it came, and wins", async () => {
     core = await FakeCore.start({ pendingPolls: Number.POSITIVE_INFINITY, codes: { [CODE]: "valid" } });
@@ -175,7 +274,8 @@ describe("an enrollment code handed in while it waits", () => {
     core = await FakeCore.start({ pendingPolls: Number.POSITIVE_INFINITY, codes: { [CODE]: "valid" } });
     const pairs = pairing({ pollMs: 60_000 });
     const running = pairs.run();
-    await until(() => pairs.pending);
+    await until(() => core.polls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the device waits for its next poll
     core.approve(); // a person typed the device code first
     await expect(pairs.enroll(CODE)).resolves.toEqual({ status: "not_pending" });
     await expect(running).resolves.toMatchObject({ token: "nst2_token-1" });

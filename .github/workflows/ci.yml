@@ -23,6 +23,11 @@ jobs:
         with:
           repository: nestor-home/nestor
           path: nestor
+      # The bundled voice's clips, for their drift test (`../nestor-satellite-python`).
+      - uses: actions/checkout@v7
+        with:
+          repository: nestor-home/nestor-satellite-python
+          path: nestor-satellite-python
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: nestor-satellite-typescript/package.json

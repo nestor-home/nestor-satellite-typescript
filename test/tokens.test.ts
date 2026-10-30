@@ -6,6 +6,7 @@ import { LocalStorageTokenStore, MemoryTokenStore, type StorageLike } from "../s
 import { FileTokenStore } from "../src/node/tokens.js";
 
 const CORE = "http://nestor.local:7860";
+const HASH = "a".repeat(64);
 
 class MapStorage implements StorageLike {
   readonly items = new Map<string, string>();
@@ -59,6 +60,17 @@ describe.each([
     expect(await store.load(CORE, "salon")).toBeNull();
     await store.forget();
   });
+
+  it("keeps the refused enrollment codes beside it, and after it is forgotten", async () => {
+    const store = await make();
+    await store.refuse(CORE, "salon", HASH, "expired");
+    await store.save(CORE, "salon", "nst1_secret");
+    await store.refuse(CORE, "salon", HASH.replace("a", "b"), "used");
+    expect(await store.load(CORE, "salon")).toBe("nst1_secret");
+    await store.forget();
+    expect(await store.refused(CORE, "salon")).toEqual({ [HASH]: "expired", [HASH.replace("a", "b")]: "used" });
+    expect(await store.refused("http://other:7860", "salon")).toEqual({});
+  });
 });
 
 describe("in a browser", () => {
@@ -82,7 +94,25 @@ describe("in a file", () => {
     await writeFile(path, "{}", { mode: 0o644 });
     await new FileTokenStore(path).save(CORE, "salon", "nst1_secret");
     expect((await stat(path)).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ core: CORE, device_id: "salon", token: "nst1_secret" });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      core: CORE,
+      device_id: "salon",
+      token: "nst1_secret",
+      refused: {},
+    });
+  });
+
+  it("written by the Python SDK, reads the same", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "nestor-")), "t.json");
+    const python = {
+      core: CORE,
+      device_id: "salon",
+      refused: { [HASH]: "cancelled", nothash: "used", ["b".repeat(64)]: "?" },
+    };
+    await writeFile(path, JSON.stringify(python));
+    const store = new FileTokenStore(path);
+    expect(await store.load(CORE, "salon")).toBeNull();
+    expect(await store.refused(CORE, "salon")).toEqual({ [HASH]: "cancelled", ["b".repeat(64)]: "unknown" });
   });
 
   it("a corrupt file is no token", async () => {

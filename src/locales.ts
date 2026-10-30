@@ -7,7 +7,9 @@
 export const en = `
 device-code-log = Pairing code: { $code }. Type it in Nestor to add this device.
 device-code-display = Type this code in Nestor to add this device.
-device-code-speech = My pairing code is { $digits }. Again: { $digits }.
+# The bundled voice has a clip for each piece of text around the digits (nestor-satellite-python's
+# scripts/voice.py records them): record them again after changing this sentence.
+device-code-speech = Pairing code: { $digits }. I repeat: { $digits }.
 headless-hint = This device has no screen and no voice, so the easiest way to pair it is an enrollment code. Add a satellite in Nestor, then set NESTOR_PAIRING_URI.
 enrollment-sent = Sending the enrollment code { $code } to Nestor.
 enrollment-refused = { $reason ->
@@ -29,12 +31,15 @@ protocol-unsupported = This Nestor speaks another version of the satellite proto
 invalid-request = Nestor refused this device's pairing request. Update this device or Nestor.
 token-refused = Nestor no longer knows this device. Pairing it again.
 link-failed = The link to Nestor failed ({ $error }). Trying again.
+camera-failed = The camera did not open, so this device cannot scan a QR code ({ $error }).
 `;
 
 export const fr = `
 device-code-log = Code d'appairage : { $code }. Saisissez-le dans Nestor pour ajouter cet appareil.
 device-code-display = Saisissez ce code dans Nestor pour ajouter cet appareil.
-device-code-speech = Mon code d'appairage est { $digits }. Je répète : { $digits }.
+# La voix fournie a un extrait pour chaque texte autour des chiffres (scripts/voice.py de
+# nestor-satellite-python les enregistre) : les réenregistrer après avoir changé cette phrase.
+device-code-speech = Code d'appairage : { $digits }. Je répète : { $digits }.
 headless-hint = Cet appareil n'a ni écran ni voix : le plus simple est de l'appairer avec un code d'enrôlement. Ajoutez un satellite dans Nestor, puis renseignez NESTOR_PAIRING_URI.
 enrollment-sent = Envoi du code d'enrôlement { $code } à Nestor.
 enrollment-refused = { $reason ->
@@ -56,6 +61,7 @@ protocol-unsupported = Ce Nestor parle une autre version du protocole des satell
 invalid-request = Nestor a refusé la demande d'appairage de cet appareil. Mettez à jour cet appareil ou Nestor.
 token-refused = Nestor ne connaît plus cet appareil. Nouvel appairage.
 link-failed = La liaison avec Nestor a échoué ({ $error }). Nouvel essai.
+camera-failed = La caméra ne s'est pas ouverte : cet appareil ne peut pas lire de QR code ({ $error }).
 `;
 
 /** The messages every catalogue has. */
@@ -78,4 +84,5 @@ export type MessageId =
   | "protocol-unsupported"
   | "invalid-request"
   | "token-refused"
-  | "link-failed";
+  | "link-failed"
+  | "camera-failed";

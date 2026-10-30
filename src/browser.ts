@@ -7,6 +7,7 @@
  */
 
 import { describe, type Logger, quietLogger } from "./log.js";
+import type { Speaker } from "./voice.js";
 import { type AudioBridge, W3cPeer, type W3cPeerConnectionConstructor, type W3cTrack } from "./w3c.js";
 import type { MediaNeeds, Peer, PeerOptions, WebRtc } from "./webrtc.js";
 
@@ -21,6 +22,8 @@ export interface BrowserWebRtcOptions {
   readonly microphone?: Readonly<Record<string, boolean | number | string>>;
   /** Where the core's voice plays (default: a detached `new Audio()`). */
   readonly element?: AudioElementLike;
+  /** Where the SDK says the device code itself (default: `webAudioSpeaker()`, `null` for none). */
+  readonly speaker?: Speaker | null;
   readonly logger?: Logger;
 }
 
@@ -40,6 +43,7 @@ export function browserWebRtc(options: BrowserWebRtcOptions = {}): WebRtc {
 }
 
 class BrowserWebRtc implements WebRtc, AudioBridge {
+  readonly speaker: Speaker | undefined;
   private readonly logger: Logger;
   private microphone: W3cTrack | null = null;
   private element: AudioElementLike | null = null;
@@ -47,6 +51,7 @@ class BrowserWebRtc implements WebRtc, AudioBridge {
 
   constructor(private readonly options: BrowserWebRtcOptions) {
     this.logger = options.logger ?? quietLogger;
+    this.speaker = (options.speaker === undefined ? webAudioSpeaker() : options.speaker) ?? undefined;
   }
 
   async open(needs: MediaNeeds): Promise<void> {
@@ -127,5 +132,86 @@ export function browserSpeech(options: { readonly lang?: string } = {}): ((text:
     if (options.lang !== undefined) utterance.lang = options.lang;
     speechSynthesis.cancel(); // the latest sentence replaces the one still being said
     speechSynthesis.speak(utterance);
+  };
+}
+
+/** What `webAudioSpeaker` needs of Web Audio (`AudioContext` fits). */
+export interface AudioContextLike {
+  readonly currentTime: number;
+  readonly destination: unknown;
+  resume(): Promise<void>;
+  createBuffer(
+    channels: number,
+    length: number,
+    sampleRate: number,
+  ): { copyToChannel(source: Float32Array<ArrayBuffer>, channel: number): void; readonly duration: number };
+  createBufferSource(): {
+    buffer: unknown;
+    connect(destination: unknown): unknown;
+    start(when: number): void;
+    stop(): void;
+    onended: (() => void) | null;
+  };
+}
+
+/**
+ * A file of the bundled voice, in the package next to this module. Written so bundlers find the files:
+ * Vite turns each template into the list of what it matches, one folder level per placeholder.
+ */
+function voiceUrl(path: string): URL {
+  const [folder, file] = path.split("/");
+  return file === undefined
+    ? new URL(`../voice/${path}`, import.meta.url)
+    : new URL(`../voice/${folder}/${file}`, import.meta.url);
+}
+
+/**
+ * The page's speaker through Web Audio, with the bundled voice fetched from the package: the device
+ * code sounds the same as on any other satellite, offline. `undefined` when the browser has no Web
+ * Audio. Browsers only play sound after a user gesture: start the satellite from a click.
+ */
+export function webAudioSpeaker(
+  options: { readonly context?: () => AudioContextLike; readonly load?: (path: string) => Promise<Uint8Array> } = {},
+): Speaker | undefined {
+  const Context = (globalThis as { AudioContext?: new () => AudioContextLike }).AudioContext;
+  const create = options.context ?? (Context === undefined ? undefined : () => new Context());
+  if (create === undefined) return undefined;
+  const load =
+    options.load ??
+    (async (path: string) => {
+      const response = await fetch(voiceUrl(path));
+      if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+      return new Uint8Array(await response.arrayBuffer());
+    });
+  let context: AudioContextLike | null = null;
+  let next = 0;
+  const playing = new Set<ReturnType<AudioContextLike["createBufferSource"]>>();
+  const sampleRate = 16_000; // the clips' own rate: Web Audio resamples to the device's
+  return {
+    sampleRate,
+    load,
+    write(pcm) {
+      if (context === null) {
+        context = create();
+        void context.resume().catch(() => {});
+      }
+      const buffer = context.createBuffer(1, pcm.length, sampleRate);
+      const floats = new Float32Array(pcm.length);
+      for (let i = 0; i < pcm.length; i++) floats[i] = (pcm[i] ?? 0) / 32768;
+      buffer.copyToChannel(floats, 0);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      next = Math.max(next, context.currentTime);
+      source.start(next);
+      next += buffer.duration;
+      playing.add(source);
+      source.onended = () => playing.delete(source);
+    },
+    flush() {
+      for (const source of playing) source.stop();
+      playing.clear();
+      next = 0;
+    },
   };
 }

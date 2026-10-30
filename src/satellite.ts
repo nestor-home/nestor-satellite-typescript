@@ -5,8 +5,10 @@
  *     await satellite.run(signal); // until the signal aborts
  *
  * Pairing (`./pairing.ts`) uses the enrollment code it was configured with, else presents its device
- * code on the outputs it was given (`pairing.display`, `pairing.speak`) and in its log. The manifest's
- * `pairing_methods` follow from those: `enrollment.provisioning` always, the others when provided.
+ * code on the outputs it was given (`pairing.display`, `pairing.speak`) and in its log. A device with a
+ * speaker and no screen says its code with the bundled voice (`./voice.ts`). While it waits, a
+ * `pairing.scanner` reads enrollment codes from QR codes. The manifest's `pairing_methods` follow
+ * from all this: `enrollment.provisioning` always, the others when the device can.
  *
  * Each connection is a WebRTC peer connection, offered to `POST /satellites/{device_id}/offer` with
  * the token: an audio track each way and the `nestor` data channel for `hello`/`welcome`, intents
@@ -14,6 +16,7 @@
  */
 
 import type { Body } from "./body.js";
+import { readEnrollment } from "./codes.js";
 import { Dispatcher } from "./dispatch.js";
 import { Messages } from "./i18n.js";
 import { describe, type Logger, quietLogger } from "./log.js";
@@ -39,6 +42,7 @@ import {
   SPEECH_ACTIVITY,
 } from "./protocol.js";
 import type { TokenStore } from "./tokens.js";
+import { SpokenCode } from "./voice.js";
 import type { Peer, SessionDescription, WebRtc } from "./webrtc.js";
 import { hello, personDetected, type SatelliteMessage, speechActivity, type Welcome } from "./wire.js";
 
@@ -50,8 +54,17 @@ export class CapabilityNotAllowed extends ProtocolError {
 /** The core does not know this token any more: pair again. */
 class Refused extends Error {}
 
+/**
+ * Reads QR codes with the device's camera (`cameraQrScanner` in `@nestor-home/satellite/qr`):
+ * declares `enrollment.qr`. The satellite runs it only while it waits to be paired.
+ */
+export interface QrScanner {
+  /** Open the camera and call `found` with the text of each QR code seen, until `signal` aborts. Rejects when the camera cannot open. */
+  scan(found: (text: string) => void, signal: AbortSignal): Promise<void>;
+}
+
 /** How this device pairs. Every field is optional: a device with none logs its device code. */
-export interface PairingSetup extends PairingOutputs {
+export interface PairingSetup extends Omit<PairingOutputs, "voice"> {
   /**
    * An enrollment code (`K7QF-2M9X`) or a pairing URI (`nestor+http://…/?code=…`) a person gave the
    * device: sent with the first request, so it pairs with no code to type.
@@ -61,9 +74,18 @@ export interface PairingSetup extends PairingOutputs {
   readonly method?: EnrollmentMethod;
   /**
    * The ways a person can hand the device an enrollment code while it waits, through `enroll`: typed
-   * on it (`enrollment.input`) or scanned (`enrollment.qr`). Declared in the manifest.
+   * on it (`enrollment.input`). Declared in the manifest. A scanned one (`enrollment.qr`) needs a
+   * camera that reads QR codes: give a `scanner`.
    */
-  readonly accepts?: readonly ("enrollment.input" | "enrollment.qr")[];
+  readonly accepts?: readonly "enrollment.input"[];
+  /** The camera that reads pairing URIs from QR codes while the device waits: declares `enrollment.qr`. */
+  readonly scanner?: QrScanner | undefined;
+  /**
+   * Say the device code with the bundled voice, on the speaker the core's voice plays on (needs
+   * `audio.playback` and a `WebRtc` with a `speaker`). By default, when the device has a speaker and
+   * no `display`; never when `speak` is given.
+   */
+  readonly voice?: boolean;
   /** Delay between polls while waiting for a proof (about a second). */
   readonly pollMs?: number;
 }
@@ -89,11 +111,16 @@ export interface SatelliteOptions {
   readonly logger?: Logger;
 }
 
-/** The pairing methods a driver supports, from what it provides. */
-export function pairingMethods(setup: PairingSetup = {}): PairingMethod[] {
+/** The pairing methods a driver supports, from what it provides; `voiced`: the bundled voice says the code. */
+export function pairingMethods(setup: PairingSetup = {}, voiced = false): PairingMethod[] {
+  const accepts: readonly string[] = setup.accepts ?? [];
+  if (accepts.some((method) => method !== "enrollment.input")) {
+    throw new ProtocolError("pairing.accepts takes enrollment.input; a scanned code needs pairing.scanner");
+  }
   const provided = new Set<PairingMethod>(["enrollment.provisioning", ...(setup.accepts ?? [])]);
   if (setup.display) provided.add("device_code.display");
-  if (setup.speak) provided.add("device_code.speech");
+  if (setup.speak || voiced) provided.add("device_code.speech");
+  if (setup.scanner) provided.add("enrollment.qr");
   return PAIRING_METHODS.filter((method) => provided.has(method));
 }
 
@@ -120,11 +147,12 @@ export class Satellite {
     this.options = options;
     this.core = options.core.replace(/\/+$/, "");
     const setup = options.pairing ?? {};
-    this.manifest = options.manifest.withPairingMethods(pairingMethods(setup));
     this.body = options.body ?? {};
     this.logger = options.logger ?? quietLogger;
     this.http = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.messages = new Messages(options.locale);
+    const voice = this.voice(setup);
+    this.manifest = options.manifest.withPairingMethods(pairingMethods(setup, voice !== undefined));
     const identify = this.body.identify?.bind(this.body);
     if (this.manifest.has(IDENTIFY) && identify === undefined) {
       throw new ProtocolError(`${IDENTIFY} is declared but the body has no identify()`);
@@ -135,15 +163,29 @@ export class Satellite {
     this.pairing = new Pairing({
       core: this.core,
       manifest: this.manifest,
-      outputs: { display: setup.display, speak: setup.speak },
+      outputs: { display: setup.display, speak: setup.speak, voice },
       identify: this.manifest.has(IDENTIFY) ? identify : undefined,
       enrollment: setup.enrollment,
       messages: this.messages,
+      store: options.tokens,
       fetch: this.http,
       logger: this.logger,
       ...(setup.method === undefined ? {} : { method: setup.method }),
       ...(setup.pollMs === undefined ? {} : { pollMs: setup.pollMs }),
     });
+  }
+
+  /** The bundled voice, when it says the device code: a speaker, and neither `speak` nor (by default) a screen. */
+  private voice(setup: PairingSetup): SpokenCode | undefined {
+    const { manifest, webrtc } = this.options;
+    const speaker = manifest.has(AUDIO_PLAYBACK) ? webrtc.speaker : undefined;
+    if (setup.voice === true && speaker === undefined) {
+      throw new ProtocolError(`pairing.voice needs ${AUDIO_PLAYBACK} declared and a speaker`);
+    }
+    const wanted = setup.speak === undefined && (setup.voice ?? setup.display === undefined);
+    return wanted && speaker !== undefined
+      ? new SpokenCode(speaker, this.messages, { logger: this.logger })
+      : undefined;
   }
 
   /** Whether the satellite waits for a person to pair it (its device code was presented). */
@@ -158,7 +200,8 @@ export class Satellite {
    */
   enroll(text: string, method: EnrollmentMethod = "enrollment.input"): Promise<EnrollOutcome> {
     if (!this.manifest.pairingMethods.includes(method)) {
-      throw new ProtocolError(`${method} is not declared: list it in pairing.accepts`);
+      const how = method === "enrollment.qr" ? "give a pairing.scanner" : "list it in pairing.accepts";
+      throw new ProtocolError(`${method} is not declared: ${how}`);
     }
     if (this.paired && !this.pairing.running) {
       this.logger.info(this.messages.format("enrollment-not-pending"));
@@ -236,14 +279,44 @@ export class Satellite {
     const device = this.manifest.device.id;
     const saved = await tokens.load(this.core, device);
     if (saved === null) {
-      const { token } = await this.pairing.run(signal);
-      await tokens.save(this.core, device, token);
-      this.paired = true;
-      return token;
+      const scanning = this.scan();
+      try {
+        const { token } = await this.pairing.run(signal);
+        await tokens.save(this.core, device, token);
+        this.paired = true;
+        return token;
+      } finally {
+        scanning?.abort();
+      }
     }
     this.paired = true;
     this.pairing.discard();
     return saved;
+  }
+
+  /** Read QR codes while pairing, if the device can: each new enrollment code is handed in. */
+  private scan(): AbortController | null {
+    const scanner = this.options.pairing?.scanner;
+    if (scanner === undefined) return null;
+    const stop = new AbortController();
+    let last: string | null = null;
+    const found = (text: string) => {
+      const read = readEnrollment(text);
+      if (read === null) {
+        this.logger.debug("a QR code that holds no enrollment code");
+        return;
+      }
+      if (read.code === last) return; // the camera sees it in every frame
+      last = read.code;
+      this.pairing.enroll(text, "enrollment.qr").then(
+        (outcome) => this.logger.debug(`scanned enrollment code: ${outcome.status}`),
+        (error: unknown) => this.logger.warn(`a scanned enrollment code failed: ${describe(error)}`),
+      );
+    };
+    scanner.scan(found, stop.signal).catch((error: unknown) => {
+      if (!stop.signal.aborted) this.logger.warn(this.messages.format("camera-failed", { error: describe(error) }));
+    });
+    return stop;
   }
 
   /** One connection, until the core hangs up or the link fails; whether it was welcomed. */

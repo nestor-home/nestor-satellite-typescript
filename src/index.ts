@@ -8,11 +8,13 @@
 
 export type { Body } from "./body.js";
 export {
+  type AudioContextLike,
   type AudioElementLike,
   type BrowserWebRtcOptions,
   browserSpeech,
   browserWebRtc,
   type SpeechSynthesisLike,
+  webAudioSpeaker,
 } from "./browser.js";
 export {
   DEVICE_CODE,
@@ -28,6 +30,7 @@ export { Dispatcher, type Outcome } from "./dispatch.js";
 export { LOCALES, type Locale, type MessageArgs, type MessageId, Messages, negotiateLocale } from "./i18n.js";
 export { type Logger, quietLogger } from "./log.js";
 export {
+  type CodeVoice,
   type EnrollOutcome,
   type Fetch,
   HttpError,
@@ -71,17 +74,35 @@ export {
   CapabilityNotAllowed,
   type PairingSetup,
   pairingMethods,
+  type QrScanner,
   Satellite,
   type SatelliteOptions,
 } from "./satellite.js";
 export {
+  type DeviceState,
+  hashEnrollmentCode,
   LocalStorageTokenStore,
   type MaybePromise,
   MemoryTokenStore,
+  type RefusedCodes,
   type StorageLike,
   type TokenStore,
 } from "./tokens.js";
 export { SDK_NAME, SDK_VERSION } from "./version.js";
+export {
+  AHEAD_MS,
+  announcement,
+  type Clock,
+  clipKey,
+  decodeWav,
+  resample,
+  type Speaker,
+  SpokenCode,
+  type SpokenCodeOptions,
+  type Step,
+  type VoiceIndex,
+  voiceMessages,
+} from "./voice.js";
 export type {
   AudioBridge,
   W3cDataChannel,

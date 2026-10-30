@@ -32,7 +32,12 @@
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
     },
+    "./qr": {
+      "types": "./dist/qr/index.d.ts",
+      "default": "./dist/qr/index.js"
+    },
     "./schemas/*": "./schemas/*",
+    "./voice/*": "./voice/*",
     "./package.json": "./package.json"
   },
   "bin": {
@@ -41,7 +46,8 @@
   "files": [
     "dist",
     "src",
-    "schemas"
+    "schemas",
+    "voice"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/node/bin.js",
@@ -54,10 +60,14 @@
     "example": "vite --config examples/browser/vite.config.ts"
   },
   "peerDependencies": {
-    "@roamhq/wrtc": "^0.10.0"
+    "@roamhq/wrtc": "^0.10.0",
+    "zxing-wasm": "^3.1.6"
   },
   "peerDependenciesMeta": {
     "@roamhq/wrtc": {
+      "optional": true
+    },
+    "zxing-wasm": {
       "optional": true
     }
   },
@@ -72,7 +82,8 @@
     "publint": "0.3.25",
     "typescript": "5.9.3",
     "vite": "8.3.5",
-    "vitest": "5.0.5"
+    "vitest": "5.0.5",
+    "zxing-wasm": "3.1.6"
   },
   "dependencies": {
     "@fluent/bundle": "0.19.1"

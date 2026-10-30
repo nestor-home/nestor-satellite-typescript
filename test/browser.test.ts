@@ -9,6 +9,7 @@ import {
   type W3cDataChannel,
   type W3cTrack,
   type W3cTrackEvent,
+  webAudioSpeaker,
 } from "../src/index.js";
 
 class Track implements W3cTrack {
@@ -228,5 +229,61 @@ describe("the browser's voice", () => {
   it("is absent where the browser cannot speak, so the satellite does not declare it", () => {
     vi.stubGlobal("speechSynthesis", undefined);
     expect(browserSpeech()).toBeUndefined();
+  });
+});
+
+describe("the bundled voice in a browser", () => {
+  class Context {
+    currentTime = 0;
+    readonly destination = "speakers";
+    readonly started: { at: number; samples: Float32Array; stopped: boolean }[] = [];
+    resumed = 0;
+    async resume() {
+      this.resumed += 1;
+    }
+    createBuffer(_channels: number, length: number, rate: number) {
+      const samples = new Float32Array(length);
+      return { duration: length / rate, samples, copyToChannel: (from: Float32Array) => samples.set(from) };
+    }
+    createBufferSource() {
+      const context = this;
+      const node = {
+        buffer: null as { samples: Float32Array } | null,
+        onended: null as (() => void) | null,
+        connect: (to: unknown) => expect(to).toBe("speakers"),
+        start(at: number) {
+          context.started.push({ at, samples: node.buffer?.samples ?? new Float32Array(), stopped: false });
+        },
+        stop() {
+          const started = context.started.find((s) => s.samples === node.buffer?.samples);
+          if (started) started.stopped = true;
+        },
+      };
+      return node;
+    }
+  }
+
+  it("plays what it is given back to back with Web Audio, and silences it at once when flushed", () => {
+    const context = new Context();
+    const speaker = webAudioSpeaker({ context: () => context, load: async () => new Uint8Array() });
+    if (speaker === undefined) throw new Error("no speaker");
+    speaker.write(new Int16Array(1600).fill(16384)); // 100 ms at 16 kHz
+    speaker.write(new Int16Array(800));
+    expect(context.started.map((s) => s.at)).toEqual([0, 0.1]);
+    expect(context.started[0]?.samples[0]).toBe(0.5);
+    expect(context.resumed).toBe(1);
+    speaker.flush?.();
+    expect(context.started.every((s) => s.stopped)).toBe(true);
+    context.currentTime = 2;
+    speaker.write(new Int16Array(160));
+    expect(context.started.at(-1)?.at).toBe(2);
+  });
+
+  it("is not there in a browser without Web Audio, nor when the page says it has no speaker", () => {
+    expect(webAudioSpeaker()).toBeUndefined(); // Node has no AudioContext
+    expect(browserWebRtc().speaker).toBeUndefined();
+    const context = () => new Context();
+    expect(browserWebRtc({ speaker: webAudioSpeaker({ context }) ?? null }).speaker).toBeDefined();
+    expect(browserWebRtc({ speaker: null }).speaker).toBeUndefined();
   });
 });

@@ -9,14 +9,16 @@
  * approved at once. Without one, it presents the device code the core gives it, on every output it
  * has (screen, voice) and always in its log, then polls until a person types that code in the admin.
  * While it waits it still takes an enrollment code at any time: whichever proof the core accepts
- * first wins. A refused enrollment code is never presented again; the device falls back to a device
- * code. On `429` it waits as long as the core asks.
+ * first wins. A refused enrollment code is never presented again, even after a restart (its hash is
+ * kept in the device's `TokenStore`); the device falls back to a device code. On `429` it waits as
+ * long as the core asks.
  */
 
 import { groupEnrollmentCode, readEnrollment } from "./codes.js";
 import { Messages } from "./i18n.js";
 import { describe, type Logger, quietLogger } from "./log.js";
 import { type EnrollmentMethod, type Manifest, ProtocolError } from "./protocol.js";
+import { hashEnrollmentCode, type TokenStore } from "./tokens.js";
 import {
   enrollmentProof,
   type PairingErrorBody,
@@ -67,6 +69,17 @@ export interface PairingOutputs {
   readonly display?: ((code: string | null, text: string) => void) | undefined;
   /** Say `text` aloud, in the device's voice. Declares `device_code.speech`. */
   readonly speak?: ((text: string) => void) | undefined;
+  /**
+   * Say the device code with the bundled voice (`SpokenCode`), when there is no `speak`: a new code
+   * replaces the one being said, and it stops once pairing ends. Declares `device_code.speech`.
+   */
+  readonly voice?: CodeVoice | undefined;
+}
+
+/** What says a device code aloud by itself (`SpokenCode`). */
+export interface CodeVoice {
+  say(code: string): void;
+  stop(): void;
 }
 
 /** What the core said when it handed out the token. */
@@ -101,6 +114,8 @@ export interface PairingOptions {
   /** How `enrollment` reached the device; `enrollment.provisioning` by default. */
   readonly method?: EnrollmentMethod;
   readonly messages?: Messages;
+  /** Where the refused enrollment codes are kept (hashed), so a restarted device never sends one again. */
+  readonly store?: Pick<TokenStore, "refused" | "refuse"> | undefined;
   /** Delay between polls of a pending pairing (about a second). */
   readonly pollMs?: number;
   /** Each HTTP request fails after this delay. */
@@ -111,6 +126,8 @@ export interface PairingOptions {
 
 interface Proof {
   readonly code: string;
+  /** Its SHA-256 hash, once computed: how refused codes are known. */
+  hash: string | null;
   readonly method: EnrollmentMethod;
   /** The `enroll` call waiting for its outcome, if any. */
   readonly settle: ((outcome: EnrollOutcome) => void) | null;
@@ -129,7 +146,7 @@ const WAITS = { too_many_attempts: "too-many-attempts", too_many_pending: "too-m
 
 /**
  * One device's pairing with one core. `run` resolves with the token; `enroll` hands in an
- * enrollment code at any time. Refused codes are remembered for the life of this object.
+ * enrollment code at any time. Refused codes are remembered in the `store`, else for the life of this object.
  */
 export class Pairing {
   readonly core: string;
@@ -139,7 +156,9 @@ export class Pairing {
   private readonly logger: Logger;
   private readonly http: Fetch;
   private readonly proofs: Proof[] = [];
+  /** Refused enrollment codes, by hash. */
   private readonly refused = new Map<string, RefusalReason>();
+  private loaded: Promise<void> | null = null;
   private pendingId: string | null = null;
   private shown: string | null = null;
   private wake: (() => void) | null = null;
@@ -157,6 +176,7 @@ export class Pairing {
       if (read === null) throw new ProtocolError(this.messages.format("enrollment-invalid"));
       this.proofs.push({
         code: read.code,
+        hash: null,
         method: options.method ?? "enrollment.provisioning",
         settle: null,
         notBefore: 0,
@@ -188,14 +208,11 @@ export class Pairing {
     if (read.core !== null && read.core !== this.core) {
       this.logger.debug(`the pairing URI names ${read.core}; sending its code to ${this.core}`);
     }
-    const reason = this.refused.get(read.code);
-    if (reason !== undefined) {
-      this.logger.warn(this.messages.format("enrollment-already-refused", { code: groupEnrollmentCode(read.code) }));
-      return Promise.resolve({ status: "refused", reason });
-    }
     return new Promise((settle) => {
-      this.proofs.push({ code: read.code, method, settle, notBefore: 0 });
+      const proof: Proof = { code: read.code, hash: null, method, settle, notBefore: 0 };
+      this.proofs.push(proof);
       this.wake?.();
+      void this.refusedBefore(proof); // settled at once when refused before, even with no pairing running
     });
   }
 
@@ -215,9 +232,10 @@ export class Pairing {
     if (this.active) throw new Error("this pairing is already running");
     this.active = true;
     try {
+      await this.load();
       for (;;) {
         signal?.throwIfAborted();
-        const proof = this.nextProof(false);
+        const proof = await this.nextProof(false);
         if (proof !== null) {
           this.logger.info(this.messages.format("enrollment-sent", { code: groupEnrollmentCode(proof.code) }));
         }
@@ -239,6 +257,7 @@ export class Pairing {
     } finally {
       this.active = false;
       this.pendingId = null;
+      this.options.outputs?.voice?.stop();
     }
   }
 
@@ -257,7 +276,7 @@ export class Pairing {
         return;
       case "enrollment_refused":
         if (proof === null) throw new HttpError(403, `pairing request: ${error.detail}`);
-        this.refuse(proof, error.reason ?? "unknown");
+        await this.refuse(proof, error.reason ?? "unknown");
         return;
       default:
         throw this.fatal(error);
@@ -297,7 +316,7 @@ export class Pairing {
 
   /** Send the enrollment codes handed in while pending, in order, until one is accepted. */
   private async sendProofs(pairingId: string, signal: AbortSignal | undefined): Promise<void> {
-    for (let proof = this.nextProof(true); proof !== null; proof = this.nextProof(true)) {
+    for (let proof = await this.nextProof(true); proof !== null; proof = await this.nextProof(true)) {
       this.logger.info(this.messages.format("enrollment-sent", { code: groupEnrollmentCode(proof.code) }));
       const path = `/satellites/pairings/${encodeURIComponent(pairingId)}/enrollment`;
       const answer = await this.call("POST", path, enrollmentProof(proof.code, proof.method), signal);
@@ -314,14 +333,14 @@ export class Pairing {
           proof.notBefore = Date.now() + waitS * 1000; // keep polling meanwhile: the device code may win
           return;
         case "enrollment_refused":
-          this.refuse(proof, error.reason ?? "unknown");
+          await this.refuse(proof, error.reason ?? "unknown");
           break;
         case "not_pending":
           // The device code won, or the pairing expired: the code is not spent, keep it for the next request.
           this.drop(proof);
           this.logger.info(this.messages.format("enrollment-not-pending"));
           proof.settle?.({ status: "not_pending" });
-          this.proofs.push({ code: proof.code, method: proof.method, settle: null, notBefore: 0 });
+          this.proofs.push({ ...proof, settle: null, notBefore: 0 });
           return;
         default:
           throw this.fatal(error);
@@ -330,14 +349,10 @@ export class Pairing {
   }
 
   /** The first enrollment code to send (and that may be sent now, when `due`); refused ones are settled on the way. */
-  private nextProof(due: boolean): Proof | null {
+  private async nextProof(due: boolean): Promise<Proof | null> {
     for (const proof of [...this.proofs]) {
-      const reason = this.refused.get(proof.code);
-      if (reason !== undefined) {
-        this.drop(proof);
-        proof.settle?.({ status: "refused", reason });
-        continue;
-      }
+      if (await this.refusedBefore(proof)) continue;
+      if (!this.proofs.includes(proof)) continue;
       if (due && proof.notBefore > Date.now()) return null;
       return proof;
     }
@@ -349,30 +364,71 @@ export class Pairing {
     if (index >= 0) this.proofs.splice(index, 1);
   }
 
-  /** An enrollment code the core refused: never again; say so, then fall back to the device code. */
-  private refuse(proof: Proof, reason: RefusalReason): void {
+  /** An enrollment code the core refused: never again, even after a restart; say so, then fall back to the device code. */
+  private async refuse(proof: Proof, reason: RefusalReason): Promise<void> {
     this.drop(proof);
-    this.refused.set(proof.code, reason);
-    const refusal = this.messages.format("enrollment-refused", { reason, code: groupEnrollmentCode(proof.code) });
-    const fallback = this.messages.format("enrollment-fallback");
-    this.logger.warn(`${refusal} ${fallback}`);
+    const hash = proof.hash ?? (await hashEnrollmentCode(proof.code));
+    this.refused.set(hash, reason);
+    try {
+      await this.options.store?.refuse(this.core, this.manifest.device.id, hash, reason);
+    } catch (error) {
+      this.logger.warn(`the refused enrollment code could not be saved: ${describe(error)}`);
+    }
+    this.tell(this.messages.format("enrollment-refused", { reason, code: groupEnrollmentCode(proof.code) }));
+    proof.settle?.({ status: "refused", reason });
+  }
+
+  /** A refused enrollment code, in the log and on the outputs, with what the device does instead. */
+  private tell(refusal: string): void {
+    this.logger.warn(`${refusal} ${this.messages.format("enrollment-fallback")}`);
     const { display, speak } = this.options.outputs ?? {};
     if (display) {
       const text = this.shown === null ? refusal : `${refusal} ${this.messages.format("device-code-display")}`;
       this.output(() => display(this.shown, text));
     }
     if (speak) this.output(() => speak(refusal));
+  }
+
+  /**
+   * Whether `proof` was refused before (by now, or before the device restarted): it is then dropped
+   * and settled, and the device says so (P5); a configured one falls back to the device code.
+   */
+  private async refusedBefore(proof: Proof): Promise<boolean> {
+    proof.hash ??= await hashEnrollmentCode(proof.code);
+    await this.load();
+    const reason = this.refused.get(proof.hash);
+    if (reason === undefined) return false;
+    if (!this.proofs.includes(proof)) return true; // settled already
+    this.drop(proof);
+    const text = this.messages.format("enrollment-already-refused", { code: groupEnrollmentCode(proof.code) });
+    if (proof.settle === null) this.tell(text);
+    else this.logger.warn(text);
     proof.settle?.({ status: "refused", reason });
+    return true;
+  }
+
+  /** The refused codes kept in the store, once. */
+  private load(): Promise<void> {
+    this.loaded ??= (async () => {
+      try {
+        const kept = await this.options.store?.refused(this.core, this.manifest.device.id);
+        for (const [hash, reason] of Object.entries(kept ?? {})) this.refused.set(hash, reason);
+      } catch (error) {
+        this.logger.warn(`the refused enrollment codes could not be read: ${describe(error)}`);
+      }
+    })();
+    return this.loaded;
   }
 
   /** P2: on every output the device has, and always in its log. */
   private present(code: string): void {
-    const { display, speak } = this.options.outputs ?? {};
+    const { display, speak, voice } = this.options.outputs ?? {};
     this.shown = code;
     this.logger.warn(this.messages.format("device-code-log", { code }));
     if (display) this.output(() => display(code, this.messages.format("device-code-display")));
     if (speak) this.output(() => speak(this.messages.format("device-code-speech", { digits: [...code].join(", ") })));
-    if (!display && !speak) this.logger.warn(this.messages.format("headless-hint"));
+    else if (voice) this.output(() => voice.say(code));
+    if (!display && !speak && !voice) this.logger.warn(this.messages.format("headless-hint"));
   }
 
   /** Paired: stop presenting the code; settle the codes handed in too late. */

@@ -7,9 +7,11 @@
  */
 
 import { describe, type Logger, quietLogger } from "../log.js";
+import { resample, type Speaker } from "../voice.js";
 import { type AudioBridge, W3cPeer, type W3cPeerConnectionConstructor, type W3cTrack } from "../w3c.js";
 import type { MediaNeeds, Peer, PeerOptions, WebRtc } from "../webrtc.js";
 import { type AudioSink, type AudioSource, DiscardSink, SilenceSource } from "./audio.js";
+import { sinkSpeaker } from "./voice.js";
 
 /** 10 ms of audio, what `RTCAudioSource.onData` takes. */
 export interface RTCAudioData {
@@ -32,7 +34,10 @@ export interface WrtcModule {
 export interface NodeWebRtcOptions {
   /** The microphone; required when `audio.capture` is declared (`SilenceSource` for none). */
   readonly source?: AudioSource;
-  /** The speaker; the core's audio is dropped without one. */
+  /**
+   * The speaker; the core's audio is dropped without one. It also says the device code with the
+   * bundled voice (unless it is a `DiscardSink`).
+   */
   readonly sink?: AudioSink;
   /** The WebRTC library (default: `import("@roamhq/wrtc")`). */
   readonly wrtc?: WrtcModule | (() => Promise<WrtcModule>);
@@ -57,6 +62,7 @@ export async function loadWrtc(): Promise<WrtcModule> {
 }
 
 class NodeWebRtc implements WebRtc, AudioBridge {
+  readonly speaker: Speaker | undefined;
   private readonly logger: Logger;
   private wrtc: WrtcModule | null = null;
   private source: AudioSource | null = null;
@@ -67,6 +73,8 @@ class NodeWebRtc implements WebRtc, AudioBridge {
 
   constructor(private readonly options: NodeWebRtcOptions) {
     this.logger = options.logger ?? quietLogger;
+    const { sink } = options;
+    this.speaker = sink === undefined || sink instanceof DiscardSink ? undefined : sinkSpeaker(sink);
   }
 
   async open(needs: MediaNeeds): Promise<void> {
@@ -179,15 +187,5 @@ export function toMono(data: RTCAudioData, rate: number): Int16Array {
       mono[i] = Math.round(sum / channels);
     }
   }
-  if (data.sampleRate === rate) return mono;
-  const out = new Int16Array(Math.round((mono.length * rate) / data.sampleRate));
-  const step = data.sampleRate / rate;
-  for (let i = 0; i < out.length; i++) {
-    const at = i * step;
-    const left = Math.floor(at);
-    const a = mono[left] ?? 0;
-    const b = mono[left + 1] ?? a;
-    out[i] = Math.round(a + (b - a) * (at - left));
-  }
-  return out;
+  return resample(mono, data.sampleRate, rate);
 }

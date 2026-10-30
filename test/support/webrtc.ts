@@ -1,6 +1,14 @@
 /** An in-process WebRTC whose peers the fake core answers: each answer is a `CoreSession`. */
 
-import type { MediaNeeds, Peer, PeerEvents, PeerOptions, SessionDescription, WebRtc } from "../../src/index.js";
+import type {
+  MediaNeeds,
+  Peer,
+  PeerEvents,
+  PeerOptions,
+  SessionDescription,
+  Speaker,
+  WebRtc,
+} from "../../src/index.js";
 import { type Answerer, type Json, Queue } from "./core.js";
 
 /** The core's side of one connection. */
@@ -82,6 +90,9 @@ export class FakeWebRtc implements WebRtc, Answerer<CoreSession> {
   opened: MediaNeeds | null = null;
   closed = 0;
   private readonly sessions = new Map<FakePeer, CoreSession>();
+
+  /** `speaker`: the device's speaker, if it has one. */
+  constructor(readonly speaker?: Speaker) {}
 
   async open(needs: MediaNeeds): Promise<void> {
     this.opened = needs;

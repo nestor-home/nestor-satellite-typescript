@@ -8,6 +8,8 @@
  * One `Peer` is one connection to the core: an audio track each way and the `nestor` data channel.
  */
 
+import type { Speaker } from "./voice.js";
+
 export interface SessionDescription {
   readonly sdp: string;
   readonly type: "offer" | "answer";
@@ -47,6 +49,11 @@ export interface Peer {
 }
 
 export interface WebRtc {
+  /**
+   * The speaker the core's voice plays on, for what the SDK says itself (the device code, with the
+   * bundled voice); `undefined` when the device has none. Heard once `open` opened the playback.
+   */
+  readonly speaker?: Speaker | undefined;
   /** Open the audio devices, once per `Satellite.run`. */
   open?(needs: MediaNeeds): Promise<void>;
   createPeer(options: PeerOptions): Peer | Promise<Peer>;

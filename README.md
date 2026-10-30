@@ -16,11 +16,22 @@ A person pairs a satellite from Nestor's admin, with one of two proofs:
 
 The SDK uses the enrollment code it is given; otherwise it asks for a device code and presents it
 through every output the driver provides, and always in the log. While it waits, `satellite.enroll()`
-still takes an enrollment code; whichever proof the core accepts first wins. The manifest's
-`pairing_methods` follow from what the driver provides: `enrollment.provisioning` always,
-`device_code.display` with `pairing.display`, `device_code.speech` with `pairing.speak`, and
-`enrollment.input` or `enrollment.qr` when listed in `pairing.accepts`. What the device says to people
-is translated (English and French, Fluent catalogues): `locale` option, else the platform's language.
+still takes an enrollment code; whichever proof the core accepts first wins. A refused enrollment code
+is never sent again, even after a restart: its SHA-256 hash is kept in the token store, never the code.
+
+The manifest's `pairing_methods` follow from what the device can do, never declared by hand:
+
+| Method                    | When                                                                                                                                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enrollment.provisioning` | always                                                                                                                                                                                                         |
+| `device_code.display`     | `pairing.display` is given                                                                                                                                                                                     |
+| `device_code.speech`      | `pairing.speak` is given, or the device has a speaker (`audio.playback`) and no `display`: the SDK then says the code itself, offline, with recorded clips (`pairing.voice: true` to also do it with a screen) |
+| `enrollment.input`        | `pairing.accepts: ["enrollment.input"]`                                                                                                                                                                        |
+| `enrollment.qr`           | `pairing.scanner` reads QR codes with a camera (`@nestor-home/satellite/qr`, browsers)                                                                                                                         |
+
+What the device says to people is translated (English and French, Fluent catalogues): `locale`
+option, else the platform's language. The bundled voice has English and French clips; another
+language is said in English.
 
 ## In Node, headless
 
@@ -34,8 +45,8 @@ npx @nestor-home/satellite run --room salon --pairing-uri 'nestor+http://nestor.
 ```
 
 The URI gives the core's address; with a bare code (`--pairing-code K7QF-2M9X`, or
-`NESTOR_PAIRING_CODE`), give it with `--core`. Without either, the satellite logs a device code to
-type in Nestor. The token is kept in `~/.config/nestor-satellite/<id>.json` (mode 600); see
+`NESTOR_PAIRING_CODE`), give it with `--core`. Without either, the satellite says a device code to
+type in Nestor on its speaker, and logs it (`--output none`: only logs it). The token is kept in `~/.config/nestor-satellite/<id>.json` (mode 600); see
 `nestor-satellite --help`.
 
 The same in code:
@@ -65,7 +76,7 @@ const satellite = new Satellite({
     source: new CommandSource("arecord -q -t raw -f S16_LE -c 1 -r 48000"),
     sink: new CommandSink("aplay -q -t raw -f S16_LE -c 1 -r 48000"),
   }),
-  pairing: { enrollment: provisioning?.enrollment }, // no screen, no voice: the device code goes to the log
+  pairing: { enrollment: provisioning?.enrollment }, // no screen: the device code is said on the sink, and logged
   locale: languagesFromEnv(), // LC_ALL, LC_MESSAGES, LANG
   body: { expression: (expression) => console.log("expression:", expression) },
 });
@@ -82,13 +93,14 @@ Served over `https:` or `localhost`, from the core's origin or through a proxy:
 import {
   AUDIO_CAPTURE,
   AUDIO_PLAYBACK,
-  browserSpeech,
   browserWebRtc,
   IDENTIFY,
   LocalStorageTokenStore,
   Manifest,
   Satellite,
 } from "@nestor-home/satellite";
+import { cameraQrScanner } from "@nestor-home/satellite/qr"; // needs `pnpm add zxing-wasm`
+import wasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url"; // Vite: served by the page, not a CDN
 
 const satellite = new Satellite({
   core: location.origin,
@@ -106,8 +118,9 @@ const satellite = new Satellite({
       document.querySelector("#code")!.textContent = code ?? "";
       document.querySelector("#status")!.textContent = text;
     },
-    speak: browserSpeech({ lang: navigator.language }), // optional: says the code aloud too
+    voice: true, // optional: says the code aloud too, with the bundled voice (Web Audio)
     accepts: ["enrollment.input"], // an enrollment code can be typed in the page
+    scanner: cameraQrScanner({ wasmUrl }), // optional: reads the pairing URI's QR code with the camera
   },
   body: {
     behavior: (behavior) => (document.body.dataset.behavior = behavior),
@@ -119,7 +132,20 @@ button.onclick = () => satellite.run(); // a click: browsers only play sound aft
 ```
 
 A tab as a satellite: `NESTOR_CORE=http://nestor.local:7860 pnpm example`, then open the page
-(`?pairing_uri=…` pairs it with an enrollment code, `?lang=fr` speaks French).
+(`?pairing_uri=…` pairs it with an enrollment code, `?lang=fr` speaks French, `?speak` says the code,
+`?qr` scans QR codes).
+
+QR codes are decoded by [`zxing-wasm`](https://github.com/Sec-ant/zxing-wasm) (ZXing-C++ in
+WebAssembly, MIT, an optional peer dependency; its reader is about 1 MB of WebAssembly, fetched from
+jsDelivr unless `wasmUrl` says where the page serves it). Node has no camera, so a Node satellite never
+declares `enrollment.qr`.
+
+## The bundled voice
+
+`voice/` holds the clips the SDK says a device code with (16 kHz mono WAV, about 500 KB), identical in
+the Python SDK, which records them with Kokoro-82M. They are shared under CC BY 4.0: see
+[`voice/LICENSE`](voice/LICENSE) for the attribution. A driver with a voice of its own passes
+`pairing.speak`, which gets the whole sentence.
 
 In Node, WebRTC is [`@roamhq/wrtc`](https://github.com/WonderInventions/node-webrtc), an optional
 peer dependency: libwebrtc, as in browsers, with Opus and RTCP built in, prebuilt for Linux and
