@@ -36,14 +36,14 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "nestor-satellite": "./dist/node/cli.js"
+    "nestor-satellite": "./dist/node/bin.js"
   },
   "files": [
     "dist",
     "schemas"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/node/cli.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/node/bin.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "biome check .",
     "format": "biome check --write .",
