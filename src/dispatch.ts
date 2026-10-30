@@ -48,6 +48,9 @@ export class Dispatcher {
       case "intent.beat":
         this.call(() => this.body.beat?.());
         break;
+      case "intent.identify":
+        this.call(() => this.body.identify?.());
+        break;
     }
     this.reply(ack(received.id)); // received, whatever the body made of it
     return "nothing";

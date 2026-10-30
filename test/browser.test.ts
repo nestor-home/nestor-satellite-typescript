@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type AudioElementLike,
+  browserSpeech,
   browserWebRtc,
   type PeerEvents,
   type W3cDataChannel,
@@ -203,5 +204,29 @@ describe("in a browser", () => {
   it("fails clearly where there is no WebRTC", async () => {
     vi.stubGlobal("RTCPeerConnection", undefined);
     await expect(browserWebRtc().open?.({ capture: false, playback: false })).rejects.toThrow(/no WebRTC/);
+  });
+});
+
+describe("the browser's voice", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("says each sentence in the language given, the latest replacing the one still being said", () => {
+    const said: { text: string; lang: string }[] = [];
+    vi.stubGlobal("speechSynthesis", { speak: (u: { text: string; lang: string }) => said.push(u), cancel: vi.fn() });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        lang = "";
+        constructor(readonly text: string) {}
+      },
+    );
+    const speak = browserSpeech({ lang: "fr-FR" });
+    speak?.("Mon code d'appairage est 0, 4, 2.");
+    expect(said).toMatchObject([{ text: "Mon code d'appairage est 0, 4, 2.", lang: "fr-FR" }]);
+  });
+
+  it("is absent where the browser cannot speak, so the satellite does not declare it", () => {
+    vi.stubGlobal("speechSynthesis", undefined);
+    expect(browserSpeech()).toBeUndefined();
   });
 });

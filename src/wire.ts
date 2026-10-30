@@ -1,15 +1,21 @@
 /**
+ * What a satellite and the core say to each other.
+ *
  * Messages on the `nestor` data channel: one JSON envelope `{type, id, at, payload}`.
  *
  * The satellite sends `hello` first, then `ack`s and observations; the core sends `welcome` and
  * `intent.*`. Reading is strict about the messages this SDK knows (a malformed one is a
  * `ProtocolError`) and lenient about the ones it does not: an unknown type from a newer core is
  * returned as `null`, so it never breaks an older driver.
+ *
+ * Bodies of the pairing endpoints (`pairing.*` schemas): requests and proofs the satellite sends,
+ * tickets, states and errors it reads.
  */
 
 import {
   BEHAVIORS,
   type Behavior,
+  type EnrollmentMethod,
   EXPRESSIONS,
   type Expression,
   type Manifest,
@@ -94,7 +100,12 @@ export interface BeatIntent {
   readonly type: "intent.beat";
 }
 
-export type Intent = BehaviorIntent | ExpressionIntent | BeatIntent;
+/** Make the device noticed for a few seconds, so a person tells it apart. Needs `device.identify`. */
+export interface IdentifyIntent {
+  readonly type: "intent.identify";
+}
+
+export type Intent = BehaviorIntent | ExpressionIntent | BeatIntent | IdentifyIntent;
 export type CoreMessage = Welcome | Intent;
 
 export interface Received {
@@ -143,11 +154,160 @@ function read(type: string, payload: Record<string, unknown>): CoreMessage | nul
       return { type, expression, intensity };
     }
     case "intent.beat":
+    case "intent.identify":
       exactKeys(payload, [], [], type);
       return { type };
     default:
       return null;
   }
+}
+
+// Pairing bodies.
+
+export const PAIRING_STATUSES = ["pending", "approved", "claimed", "expired"] as const;
+export type PairingStatus = (typeof PAIRING_STATUSES)[number];
+export const PAIRING_ERRORS = [
+  "invalid_request",
+  "protocol_unsupported",
+  "too_many_pending",
+  "too_many_attempts",
+  "enrollment_refused",
+  "not_pending",
+] as const;
+export type PairingErrorCode = (typeof PAIRING_ERRORS)[number];
+/** Why an enrollment code pairs nothing. */
+export const REFUSAL_REASONS = ["unknown", "expired", "used", "cancelled"] as const;
+export type RefusalReason = (typeof REFUSAL_REASONS)[number];
+
+export interface EnrollmentProof {
+  readonly enrollment_code: string;
+  readonly method: EnrollmentMethod;
+}
+
+/** `POST /satellites/pairings`: the manifest, with the enrollment code the device was given, if any. */
+export interface PairingRequest {
+  readonly manifest: ManifestJson;
+  readonly enrollment_code?: string;
+  readonly method?: EnrollmentMethod;
+}
+
+export function pairingRequest(manifest: Manifest, proof: EnrollmentProof | null = null): PairingRequest {
+  return proof === null ? { manifest: manifest.toJSON() } : { manifest: manifest.toJSON(), ...proof };
+}
+
+/** `POST /satellites/pairings/{pairing_id}/enrollment`: a pending device's enrollment code. */
+export function enrollmentProof(code: string, method: EnrollmentMethod): EnrollmentProof {
+  return { enrollment_code: code, method };
+}
+
+/** The answer to a pairing request. */
+export interface PairingTicket {
+  readonly pairingId: string;
+  readonly status: PairingStatus;
+  readonly expiresAt: string;
+  /** The 6 digits to present, when the device is pending without a proof. */
+  readonly deviceCode: string | null;
+}
+
+/** Where a pairing stands. */
+export interface PairingState {
+  readonly status: PairingStatus;
+  /** Handed out once, with the first `approved` answer. */
+  readonly token: string | null;
+  readonly deviceId: string | null;
+  readonly room: string | null;
+  readonly capabilities: ReadonlySet<string> | null;
+  /** A person asks the pending device to make itself noticed. */
+  readonly identify: boolean;
+}
+
+/** An error answer of the pairing endpoints. `detail` is English, for logs only. */
+export interface PairingErrorBody {
+  readonly error: PairingErrorCode;
+  readonly detail: string;
+  readonly reason: RefusalReason | null;
+  readonly retryAfterS: number | null;
+}
+
+export function parseTicket(data: unknown): PairingTicket {
+  const body = record(data, "pairing.ticket");
+  exactKeys(
+    body,
+    ["pairing_id", "status", "expires_at", "device_code"],
+    ["pairing_id", "status", "expires_at"],
+    "pairing.ticket",
+  );
+  const { pairing_id, status, expires_at, device_code } = body;
+  if (typeof pairing_id !== "string" || pairing_id.length === 0) {
+    throw new ProtocolError("pairing.ticket: pairing_id must be a string");
+  }
+  if (typeof expires_at !== "string" || Number.isNaN(Date.parse(expires_at))) {
+    throw new ProtocolError("pairing.ticket: expires_at must be a date-time");
+  }
+  if (device_code !== undefined && (typeof device_code !== "string" || !/^\d{6}$/.test(device_code))) {
+    throw new ProtocolError("pairing.ticket: device_code must be 6 digits");
+  }
+  return {
+    pairingId: pairing_id,
+    status: member(PAIRING_STATUSES, status, "pairing.ticket.status"),
+    expiresAt: expires_at,
+    deviceCode: device_code ?? null,
+  };
+}
+
+export function parseState(data: unknown): PairingState {
+  const body = record(data, "pairing.state");
+  exactKeys(body, ["status", "token", "device_id", "room", "capabilities", "identify"], ["status"], "pairing.state");
+  const { status, token, device_id, room, capabilities, identify } = body;
+  if (token !== undefined && (typeof token !== "string" || token.length === 0)) {
+    throw new ProtocolError("pairing.state: token must be a non-empty string");
+  }
+  for (const [name, value] of [
+    ["device_id", device_id],
+    ["room", room],
+  ] as const) {
+    if (value !== undefined && typeof value !== "string")
+      throw new ProtocolError(`pairing.state: ${name} must be a string`);
+  }
+  if (
+    capabilities !== undefined &&
+    (!Array.isArray(capabilities) || !capabilities.every((c) => typeof c === "string"))
+  ) {
+    throw new ProtocolError("pairing.state: capabilities must be a list of strings");
+  }
+  if (identify !== undefined && identify !== true) throw new ProtocolError("pairing.state: identify is only ever true");
+  return {
+    status: member(PAIRING_STATUSES, status, "pairing.state.status"),
+    token: (token as string | undefined) ?? null,
+    deviceId: (device_id as string | undefined) ?? null,
+    room: (room as string | undefined) ?? null,
+    capabilities: capabilities === undefined ? null : new Set(capabilities as string[]),
+    identify: identify === true,
+  };
+}
+
+/** An error answer; `null` when the body is not one (a proxy's page, a crash). */
+export function parseError(data: unknown): PairingErrorBody | null {
+  try {
+    const body = record(data, "pairing.error");
+    exactKeys(body, ["error", "detail", "reason", "retry_after_s"], ["error", "detail"], "pairing.error");
+    const { error, detail, reason, retry_after_s } = body;
+    if (typeof detail !== "string") return null;
+    if (retry_after_s !== undefined && (!Number.isInteger(retry_after_s) || (retry_after_s as number) < 0)) return null;
+    return {
+      error: member(PAIRING_ERRORS, error, "pairing.error.error"),
+      detail,
+      reason: reason === undefined ? null : member(REFUSAL_REASONS, reason, "pairing.error.reason"),
+      retryAfterS: (retry_after_s as number | undefined) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function record(data: unknown, where: string): Record<string, unknown> {
+  if (!isRecord(data)) throw new ProtocolError(`${where}: expected a JSON object`);
+  return data;
 }
 
 /** Whether a received JSON value is one of the transport's own messages, and whether it says the core left. */

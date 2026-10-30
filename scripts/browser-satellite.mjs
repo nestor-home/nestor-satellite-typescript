@@ -3,7 +3,9 @@
 //
 //     python scripts/conformance.py node scripts/browser-satellite.mjs --core {url}
 //
-// Chromium's fake microphone (a beep) and fake permission prompt stand in for a person.
+// Chromium's fake microphone (a beep) and fake permission prompt stand in for a person. The
+// enrollment code a scenario configures (`NESTOR_PAIRING_URI`) reaches the page in its address,
+// as a person would paste it; each launch is a fresh browser, so a fresh token store.
 
 import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
@@ -16,6 +18,15 @@ if (!values.core) {
 }
 
 process.env.NESTOR_CORE = values.core;
+// Chromium starts while Vite does: the suite times how soon a driver asks to pair (its rate limit
+// scenario lasts 1.5 s from launch).
+const launching = chromium.launch({
+  args: [
+    "--use-fake-ui-for-media-stream",
+    "--use-fake-device-for-media-stream",
+    "--autoplay-policy=no-user-gesture-required",
+  ],
+});
 const server = await createServer({
   configFile: new URL("../examples/browser/vite.config.ts", import.meta.url).pathname,
   server: { port: 0, host: "localhost" },
@@ -23,15 +34,11 @@ const server = await createServer({
 });
 await server.listen();
 const page_url = new URL(server.resolvedUrls?.local[0] ?? "");
-page_url.search = new URLSearchParams({ auto: "", room: values.room, id: "navigateur-test" }).toString();
+const query = new URLSearchParams({ auto: "", room: values.room, id: "navigateur-test" });
+if (process.env.NESTOR_PAIRING_URI) query.set("pairing_uri", process.env.NESTOR_PAIRING_URI);
+page_url.search = query.toString();
 
-const browser = await chromium.launch({
-  args: [
-    "--use-fake-ui-for-media-stream",
-    "--use-fake-device-for-media-stream",
-    "--autoplay-policy=no-user-gesture-required",
-  ],
-});
+const browser = await launching;
 const page = await browser.newPage();
 page.on("console", (message) => console.error(`[browser] ${message.text()}`));
 page.on("pageerror", (error) => console.error(`[browser] ${error.message}`));

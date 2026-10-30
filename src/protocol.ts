@@ -1,17 +1,20 @@
 /**
- * The values of the satellite protocol `nestor.satellite/1`: a device, what it can do, and the
- * intents it receives. They mirror the JSON Schemas shipped in `schemas/`, published by the server.
+ * The values of the satellite protocol `nestor.satellite/2`: a device, what it can do, how it can
+ * be paired, and the intents it receives. They mirror the JSON Schemas shipped in `schemas/`,
+ * published by the server.
  */
 
 import { SDK_NAME, SDK_VERSION } from "./version.js";
 
-export const PROTOCOL = "nestor.satellite/1";
+export const PROTOCOL = "nestor.satellite/2";
 
 // Capabilities the core knows today; a driver may declare others (`family.feature`).
 export const AUDIO_CAPTURE = "audio.capture";
 export const AUDIO_PLAYBACK = "audio.playback";
 export const EXPRESSION = "expression.emotion";
 export const HEAD_MOTION = "motion.head";
+/** The device can make itself noticed (blink, wiggle, chime) so a person tells it apart. */
+export const IDENTIFY = "device.identify";
 export const PERSON_DETECTION = "vision.person_detection";
 export const SPEECH_ACTIVITY = "audio.speech_activity";
 
@@ -28,7 +31,25 @@ export type Behavior = (typeof BEHAVIORS)[number];
 export const EXPRESSIONS = ["joy", "sigh", "thoughtful", "whisper", "excited", "ahem"] as const;
 export type Expression = (typeof EXPRESSIONS)[number];
 
-/** Something that does not follow `nestor.satellite/1`. */
+/**
+ * How a person can pair a device: it shows or says a device code that the person types in the admin
+ * (`device_code.*`), or it receives an enrollment code made in the admin (`enrollment.*`): typed on
+ * the device, set in its configuration, or scanned as a QR code.
+ */
+export const PAIRING_METHODS = [
+  "device_code.display",
+  "device_code.speech",
+  "enrollment.input",
+  "enrollment.provisioning",
+  "enrollment.qr",
+] as const;
+export type PairingMethod = (typeof PAIRING_METHODS)[number];
+
+/** The methods that bring an enrollment code to the device. */
+export const ENROLLMENT_METHODS = ["enrollment.input", "enrollment.provisioning", "enrollment.qr"] as const;
+export type EnrollmentMethod = (typeof ENROLLMENT_METHODS)[number];
+
+/** Something that does not follow `nestor.satellite/2`. */
 export class ProtocolError extends Error {
   override name = "ProtocolError";
 }
@@ -99,7 +120,18 @@ export interface ManifestJson {
   readonly protocol: typeof PROTOCOL;
   readonly device: { readonly id: string; readonly model: string; readonly room: string; readonly brand?: string };
   readonly capabilities: readonly { readonly name: string; readonly [param: string]: JsonValue }[];
+  readonly pairing_methods: readonly PairingMethod[];
   readonly sdk?: Sdk;
+}
+
+export interface ManifestOptions {
+  /** This SDK by default; `null` to say nothing. */
+  readonly sdk?: Sdk | null;
+  /**
+   * How a person can pair it (`enrollment.provisioning` by default). A `Satellite` sets them from
+   * what its driver provides.
+   */
+  readonly pairingMethods?: readonly PairingMethod[];
 }
 
 /** What a device says about itself when it pairs and when it connects. */
@@ -108,8 +140,14 @@ export class Manifest {
   readonly capabilities: readonly Capability[];
   /** This SDK by default; `null` to say nothing. */
   readonly sdk: Sdk | null;
+  readonly pairingMethods: readonly PairingMethod[];
 
-  constructor(device: Device | DeviceInit, capabilities: readonly (Capability | string)[] = [], sdk: Sdk | null = SDK) {
+  constructor(
+    device: Device | DeviceInit,
+    capabilities: readonly (Capability | string)[] = [],
+    options: ManifestOptions = {},
+  ) {
+    const { sdk = SDK, pairingMethods = ["enrollment.provisioning"] } = options;
     this.device = device instanceof Device ? device : new Device(device);
     this.capabilities = Object.freeze(capabilities.map((c) => (typeof c === "string" ? capability(c) : c)));
     if (this.capabilities.length > MAX_CAPABILITIES) {
@@ -126,10 +164,26 @@ export class Manifest {
       }
     }
     this.sdk = sdk;
+    if (pairingMethods.length === 0 || new Set(pairingMethods).size !== pairingMethods.length) {
+      throw new ProtocolError("a device supports at least one pairing method, each listed once");
+    }
+    for (const method of pairingMethods) {
+      if (!PAIRING_METHODS.includes(method)) {
+        throw new ProtocolError(
+          `unknown pairing method ${JSON.stringify(method)}: one of ${PAIRING_METHODS.join(", ")}`,
+        );
+      }
+    }
+    this.pairingMethods = Object.freeze([...pairingMethods]);
   }
 
   static of(device: Device | DeviceInit, ...names: string[]): Manifest {
     return new Manifest(device, names);
+  }
+
+  /** The same manifest with other pairing methods. */
+  withPairingMethods(methods: readonly PairingMethod[]): Manifest {
+    return new Manifest(this.device, this.capabilities, { sdk: this.sdk, pairingMethods: methods });
   }
 
   /** The declared capability names. */
@@ -147,6 +201,7 @@ export class Manifest {
       protocol: PROTOCOL,
       device: brand === undefined ? { id, model, room } : { id, model, room, brand },
       capabilities: this.capabilities.map((c) => ({ name: c.name, ...c.params })),
+      pairing_methods: [...this.pairingMethods],
       ...(this.sdk === null ? {} : { sdk: { name: this.sdk.name, version: this.sdk.version } }),
     };
   }

@@ -6,9 +6,11 @@
     <title>Nestor satellite</title>
     <style>
       :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-      body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+      body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; transition: background-color 0.2s; }
+      body.identify { animation: identify 0.5s steps(1) 6; }
+      @keyframes identify { 50% { background-color: #f5c400; } }
       label { display: block; margin: 0.5rem 0; }
-      #code { font-size: 3rem; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
+      #code { font-size: 3rem; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; margin: 0; }
       #log { font: 0.85rem ui-monospace, monospace; white-space: pre-wrap; }
     </style>
   </head>
@@ -17,10 +19,16 @@
     <form id="form">
       <label>Room <input name="room" value="salon" pattern="[a-z0-9][a-z0-9_-]*" required /></label>
       <label>Device id <input name="id" value="navigateur" pattern="[a-z0-9][a-z0-9_-]*" required /></label>
+      <label>Enrollment code or pairing URI, if Nestor gave you one <input name="enrollment" /></label>
+      <label><input type="checkbox" name="speak" /> Say the pairing code aloud</label>
       <button>Start</button>
     </form>
     <p id="status">Stopped.</p>
     <p id="code" hidden></p>
+    <form id="enroll" hidden>
+      <label>Or type an enrollment code <input name="code" placeholder="K7QF-2M9X" required /></label>
+      <button>Send</button>
+    </form>
     <div id="log"></div>
     <script type="module" src="./main.ts"></script>
   </body>

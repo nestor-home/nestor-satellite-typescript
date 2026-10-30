@@ -1,4 +1,4 @@
-/** A satellite's life against a fake core: pairing, hello/welcome, acks, observations, reconnection. */
+/** A satellite's life against a fake core: pairing, hello/welcome, acks, identify, observations, reconnection. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -7,10 +7,13 @@ import {
   type Body,
   CapabilityNotAllowed,
   EXPRESSION,
+  IDENTIFY,
   type Logger,
   Manifest,
   MemoryTokenStore,
+  PairingError,
   PERSON_DETECTION,
+  ProtocolError,
   Satellite,
   type SatelliteOptions,
   SPEECH_ACTIVITY,
@@ -52,8 +55,7 @@ async function start(
     manifest: Manifest.of(DEVICE, ...capabilities),
     tokens,
     webrtc: fake.webrtc instanceof FakeWebRtc ? fake.webrtc : webrtc,
-    onCode: (code) => codes.push(code),
-    pollMs: 5,
+    pairing: { display: (code) => void (code === null || codes.push(code)), pollMs: 5 },
     backoffMs: [5, 20],
     logger: silent,
     ...options,
@@ -87,10 +89,15 @@ describe("a satellite", () => {
     const { core, codes, tokens } = await start([AUDIO_CAPTURE]);
     const session = await core.sessions.next();
     const hello = await greet(session, [AUDIO_CAPTURE]);
-    expect(hello).toMatchObject({ type: "hello", payload: { manifest: Manifest.of(DEVICE, AUDIO_CAPTURE).toJSON() } });
+    const manifest = Manifest.of(DEVICE, AUDIO_CAPTURE).withPairingMethods([
+      "device_code.display",
+      "enrollment.provisioning",
+    ]);
+    expect(hello).toMatchObject({ type: "hello", payload: { manifest: manifest.toJSON() } });
+    expect(core.pairRequests).toEqual([{ manifest: manifest.toJSON() }]);
     expect(codes).toEqual(["042137"]);
-    expect(tokens.load(core.url, DEVICE.id)).toBe("nst1_token-1");
-    expect(core.offers[0]?.authorization).toBe("Bearer nst1_token-1");
+    expect(tokens.load(core.url, DEVICE.id)).toBe("nst2_token-1");
+    expect(core.offers[0]?.authorization).toBe("Bearer nst2_token-1");
   });
 
   it("opens the audio the manifest declares, and releases it when stopped", async () => {
@@ -136,7 +143,7 @@ describe("a satellite", () => {
     const third = await core.sessions.next();
     expect((await third.received.next()).type).toBe("hello");
     expect(codes).toHaveLength(1);
-    expect(new Set(core.offers.map((o) => o.authorization))).toEqual(new Set(["Bearer nst1_token-1"]));
+    expect(new Set(core.offers.map((o) => o.authorization))).toEqual(new Set(["Bearer nst2_token-1"]));
     expect(satellite.connections).toBe(3);
   });
 
@@ -144,13 +151,13 @@ describe("a satellite", () => {
     const tokens = new MemoryTokenStore();
     const webrtc = new FakeWebRtc();
     const core = await FakeCore.start({ webrtc });
-    tokens.save(core.url, DEVICE.id, "nst1_from-another-life");
+    tokens.save(core.url, DEVICE.id, "nst2_from-another-life");
     const { codes } = await start([AUDIO_CAPTURE], { tokens }, core);
     const session = await core.sessions.next();
     await greet(session, []);
-    expect(core.offers.map((o) => o.authorization)).toEqual(["Bearer nst1_from-another-life", "Bearer nst1_token-1"]);
+    expect(core.offers.map((o) => o.authorization)).toEqual(["Bearer nst2_from-another-life", "Bearer nst2_token-1"]);
     expect(codes).toHaveLength(1);
-    expect(tokens.load(core.url, DEVICE.id)).toBe("nst1_token-1");
+    expect(tokens.load(core.url, DEVICE.id)).toBe("nst2_token-1");
   });
 
   it("pairs again when the household revokes it while it is connected", async () => {
@@ -162,7 +169,7 @@ describe("a satellite", () => {
     const second = await core.sessions.next();
     await greet(second, []);
     expect(codes).toHaveLength(2);
-    expect(core.offers.at(-1)?.authorization).toBe("Bearer nst1_token-2");
+    expect(core.offers.at(-1)?.authorization).toBe("Bearer nst2_token-2");
   });
 
   it("drops a connection that is never welcomed, and tries again", async () => {
@@ -220,6 +227,103 @@ describe("a satellite", () => {
   it("cannot run twice at once", async () => {
     const { satellite } = await start([AUDIO_CAPTURE]);
     await expect(satellite.run()).rejects.toThrow(/already running/);
+  });
+});
+
+describe("pairing", () => {
+  it("declares the pairing methods its driver provides, configuration always", () => {
+    const methods = (pairing: SatelliteOptions["pairing"]) =>
+      new Satellite({
+        core: "http://c",
+        manifest: Manifest.of(DEVICE),
+        tokens: new MemoryTokenStore(),
+        webrtc: new FakeWebRtc(),
+        ...(pairing === undefined ? {} : { pairing }),
+      }).manifest.pairingMethods;
+    expect(methods(undefined)).toEqual(["enrollment.provisioning"]);
+    expect(methods({ speak: () => {}, accepts: ["enrollment.qr", "enrollment.input"] })).toEqual([
+      "device_code.speech",
+      "enrollment.input",
+      "enrollment.provisioning",
+      "enrollment.qr",
+    ]);
+  });
+
+  it("pairs with the enrollment code it was configured with, presenting no device code", async () => {
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc, codes: { K7QF2M9X: "valid" } });
+    const enrollment = `nestor+${core.url}/?code=K7QF-2M9X`;
+    const { codes } = await start([AUDIO_CAPTURE], { pairing: { enrollment, pollMs: 5 } }, core);
+    await greet(await core.sessions.next(), []);
+    expect(core.pairRequests).toMatchObject([{ enrollment_code: "K7QF2M9X", method: "enrollment.provisioning" }]);
+    expect(codes).toEqual([]);
+  });
+
+  it("without a screen or a voice, still pairs, its device code in the log", async () => {
+    const warn = vi.fn();
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc });
+    await start([AUDIO_CAPTURE], { pairing: { pollMs: 5 }, logger: { ...silent, warn } }, core);
+    await greet(await core.sessions.next(), []);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("042137"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("NESTOR_PAIRING_URI"));
+  });
+
+  it("takes an enrollment code typed while it waits", async () => {
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc, codes: { K7QF2M9X: "valid" }, pendingPolls: Number.POSITIVE_INFINITY });
+    const { satellite } = await start([], { pairing: { accepts: ["enrollment.input"], pollMs: 5 } }, core);
+    await until(() => satellite.pending);
+    await expect(satellite.enroll("k7qf-2m9x")).resolves.toEqual({ status: "approved" });
+    await greet(await core.sessions.next(), []);
+    expect(core.enrollments).toEqual([{ enrollment_code: "K7QF2M9X", method: "enrollment.input" }]);
+    await expect(satellite.enroll("K7QF2M9X")).resolves.toEqual({ status: "not_pending" });
+  });
+
+  it("refuses an enrollment code through a method it does not declare", () => {
+    const satellite = new Satellite({
+      core: "http://c",
+      manifest: Manifest.of(DEVICE),
+      tokens: new MemoryTokenStore(),
+      webrtc: new FakeWebRtc(),
+    });
+    expect(() => satellite.enroll("K7QF2M9X", "enrollment.qr")).toThrow(/enrollment.qr/);
+  });
+
+  it("stops with a clear error when the core speaks another protocol version", async () => {
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc });
+    core.protocolUnsupported = true;
+    const run = await start([AUDIO_CAPTURE], { locale: "fr" }, core);
+    await expect(run.done).rejects.toBeInstanceOf(PairingError);
+    await expect(run.done).rejects.toThrow(/autre version du protocole/);
+    expect(webrtc.closed).toBe(1);
+  });
+});
+
+describe("identify", () => {
+  it("is declared only with a body that can carry it out", () => {
+    const options = { core: "http://c", tokens: new MemoryTokenStore(), webrtc: new FakeWebRtc() };
+    expect(() => new Satellite({ ...options, manifest: Manifest.of(DEVICE, IDENTIFY) })).toThrow(ProtocolError);
+    expect(
+      () => new Satellite({ ...options, manifest: Manifest.of(DEVICE, IDENTIFY), body: { identify: () => {} } }),
+    ).not.toThrow();
+  });
+
+  it("makes the device noticed while it waits to be paired, and once paired, acknowledged", async () => {
+    const identify = vi.fn();
+    const webrtc = new FakeWebRtc();
+    const core = await FakeCore.start({ webrtc, pendingPolls: Number.POSITIVE_INFINITY });
+    const { satellite } = await start([IDENTIFY], { body: { identify } }, core);
+    await until(() => satellite.pending);
+    core.identify();
+    await until(() => identify.mock.calls.length === 1);
+    core.approve();
+    const session = await core.sessions.next();
+    await greet(session, [IDENTIFY]);
+    session.send(message("intent.identify", {}, "i-1"));
+    expect(await session.nextOfType("ack")).toMatchObject({ payload: { of: "i-1" } });
+    expect(identify).toHaveBeenCalledTimes(2);
   });
 });
 

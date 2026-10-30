@@ -1,17 +1,42 @@
 /**
  * Write a Nestor satellite in TypeScript: pair with the core, stream audio over WebRTC, carry out
- * its intents and report observations, following the `nestor.satellite/1` protocol.
+ * its intents and report observations, following the `nestor.satellite/2` protocol.
  *
  * This entry point runs anywhere (browsers, Node, workers): it touches no platform API until a
  * `WebRtc` adapter does. Node's adapter, audio and token file live in `@nestor-home/satellite/node`.
  */
 
 export type { Body } from "./body.js";
-export { type AudioElementLike, type BrowserWebRtcOptions, browserWebRtc } from "./browser.js";
+export {
+  type AudioElementLike,
+  type BrowserWebRtcOptions,
+  browserSpeech,
+  browserWebRtc,
+  type SpeechSynthesisLike,
+} from "./browser.js";
+export {
+  DEVICE_CODE,
+  ENROLLMENT_ALPHABET,
+  ENROLLMENT_LENGTH,
+  groupEnrollmentCode,
+  normalizeEnrollmentCode,
+  type PairingUri,
+  parsePairingUri,
+  readEnrollment,
+} from "./codes.js";
 export { Dispatcher, type Outcome } from "./dispatch.js";
 export { LOCALES, type Locale, type MessageArgs, type MessageId, Messages, negotiateLocale } from "./i18n.js";
 export { type Logger, quietLogger } from "./log.js";
-export { type Fetch, HttpError, type PairOptions, pair, showCode } from "./pairing.js";
+export {
+  type EnrollOutcome,
+  type Fetch,
+  HttpError,
+  type Paired,
+  Pairing,
+  PairingError,
+  type PairingOptions,
+  type PairingOutputs,
+} from "./pairing.js";
 export {
   AUDIO_CAPTURE,
   AUDIO_PLAYBACK,
@@ -21,14 +46,20 @@ export {
   capability,
   Device,
   type DeviceInit,
+  ENROLLMENT_METHODS,
+  type EnrollmentMethod,
   EXPRESSION,
   EXPRESSIONS,
   type Expression,
   HEAD_MOTION,
+  IDENTIFY,
   type JsonValue,
   MAX_CAPABILITIES,
   Manifest,
   type ManifestJson,
+  type ManifestOptions,
+  PAIRING_METHODS,
+  type PairingMethod,
   PERSON_DETECTION,
   PROTOCOL,
   ProtocolError,
@@ -36,7 +67,13 @@ export {
   type Sdk,
   SPEECH_ACTIVITY,
 } from "./protocol.js";
-export { CapabilityNotAllowed, Satellite, type SatelliteOptions } from "./satellite.js";
+export {
+  CapabilityNotAllowed,
+  type PairingSetup,
+  pairingMethods,
+  Satellite,
+  type SatelliteOptions,
+} from "./satellite.js";
 export {
   LocalStorageTokenStore,
   type MaybePromise,

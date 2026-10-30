@@ -14,6 +14,15 @@ export {
   RecordingSink,
   SilenceSource,
 } from "./audio.js";
+export {
+  type Environment,
+  languagesFromEnv,
+  PAIRING_CODE_ENV,
+  PAIRING_URI_ENV,
+  type Provisioning,
+  provisioningFromEnv,
+  readProvisioning,
+} from "./env.js";
 export { FileTokenStore } from "./tokens.js";
 export {
   loadWrtc,

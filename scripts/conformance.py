@@ -1,9 +1,12 @@
 """Run the Nestor server's black-box conformance suite against a satellite command.
 
-    python scripts/conformance.py node dist/node/bin.js run --core {url} --room salon --input none --output none
+    python scripts/conformance.py node dist/node/bin.js run --core {url} --room salon \
+        --input none --output none --token-file {state}/token.json
 
-Needs the `nestor` package (its venv: `../nestor/.venv/bin/python`). `{url}` is replaced by the
-fake core's address. Prints one line per check, then exits 0 when every check passed.
+Needs the `nestor` package (its venv: `../nestor/.venv/bin/python`). The suite launches the command
+once per scenario: `{url}` is replaced by the fake core's address, `{state}` by a fresh folder for
+the token, and the enrollment scenarios set `NESTOR_PAIRING_URI`. Prints one line per check, then
+exits 0 when every check passed.
 """
 
 import asyncio

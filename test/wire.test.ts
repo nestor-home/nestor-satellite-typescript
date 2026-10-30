@@ -50,6 +50,7 @@ describe("reading the core", () => {
       intensity: 0.4,
     });
     expect(wire.parse(of("intent.beat", {})).message).toEqual({ type: "intent.beat" });
+    expect(wire.parse(of("intent.identify", {})).message).toEqual({ type: "intent.identify" });
   });
 
   it("gives an expression its full intensity when the core does not say", () => {
@@ -75,6 +76,7 @@ describe("reading the core", () => {
     ["an intensity that is a string", of("intent.expression", { expression: "joy", intensity: "1" })],
     ["capabilities that are not strings", of("welcome", { device_id: "a", room: "r", capabilities: [1] })],
     ["a welcome without its room", of("welcome", { device_id: "a", capabilities: [] })],
+    ["an identify with a payload", of("intent.identify", { seconds: 3 })],
   ])("refuses a known message with %s", (_case, data) => {
     expect(() => wire.parse(data)).toThrow(ProtocolError);
   });
@@ -83,5 +85,56 @@ describe("reading the core", () => {
     expect(wire.signalling({ type: "signalling", message: { type: "peerLeft" } })).toEqual({ hungUp: true });
     expect(wire.signalling({ type: "signalling", message: { type: "renegotiate" } })).toEqual({ hungUp: false });
     expect(wire.signalling(of("intent.beat", {}))).toBeNull();
+  });
+});
+
+describe("reading the pairing endpoints", () => {
+  it("reads a ticket, with the device code when pending", () => {
+    const ticket = { pairing_id: "p-1", status: "pending", expires_at: AT, device_code: "042917" };
+    expect(wire.parseTicket(ticket)).toEqual({
+      pairingId: "p-1",
+      status: "pending",
+      expiresAt: AT,
+      deviceCode: "042917",
+    });
+    expect(wire.parseTicket({ ...ticket, status: "approved", device_code: undefined }).deviceCode).toBeNull();
+  });
+
+  it("reads a state, its token and whether to identify", () => {
+    expect(wire.parseState({ status: "pending", identify: true })).toMatchObject({ status: "pending", identify: true });
+    expect(
+      wire.parseState({ status: "approved", token: "nst2_x", device_id: "a", room: "r", capabilities: [] }),
+    ).toEqual({
+      status: "approved",
+      token: "nst2_x",
+      deviceId: "a",
+      room: "r",
+      capabilities: new Set(),
+      identify: false,
+    });
+  });
+
+  it.each([
+    ["a ticket without its id", () => wire.parseTicket({ status: "pending", expires_at: AT })],
+    [
+      "a device code of 5 digits",
+      () => wire.parseTicket({ pairing_id: "p", status: "pending", expires_at: AT, device_code: "04291" }),
+    ],
+    ["an unknown status", () => wire.parseState({ status: "lost" })],
+    ["identify false", () => wire.parseState({ status: "pending", identify: false })],
+    ["an empty token", () => wire.parseState({ status: "approved", token: "" })],
+  ])("refuses %s", (_case, read) => {
+    expect(read).toThrow(ProtocolError);
+  });
+
+  it("reads an error answer, and tells a stranger's page apart", () => {
+    expect(wire.parseError({ error: "enrollment_refused", detail: "no", reason: "expired" })).toEqual({
+      error: "enrollment_refused",
+      detail: "no",
+      reason: "expired",
+      retryAfterS: null,
+    });
+    expect(wire.parseError({ detail: "Bad Gateway" })).toBeNull();
+    expect(wire.parseError("<html>")).toBeNull();
   });
 });

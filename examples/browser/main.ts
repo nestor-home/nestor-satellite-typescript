@@ -1,9 +1,18 @@
-/** A browser tab as a Nestor satellite: microphone and speaker, the pairing code on screen, intents logged. */
+/**
+ * A browser tab as a Nestor satellite: microphone and speaker, the device code on screen (and aloud,
+ * if asked), an enrollment code typed in the page or passed in the address, intents logged.
+ *
+ * Address parameters: `?auto&room=salon&id=tab` starts at once (tests; browsers then need autoplay
+ * allowed), `pairing_uri=nestor+http://…/?code=…` pairs with that enrollment code, `lang=fr` picks
+ * the language, `core=http://…` talks to another core than this page's origin.
+ */
 
 import {
   AUDIO_CAPTURE,
   AUDIO_PLAYBACK,
+  browserSpeech,
   browserWebRtc,
+  IDENTIFY,
   LocalStorageTokenStore,
   type Logger,
   Manifest,
@@ -12,40 +21,74 @@ import {
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const form = $<HTMLFormElement>("form");
+const enrollForm = $<HTMLFormElement>("enroll");
 const status = $<HTMLParagraphElement>("status");
 const code = $<HTMLParagraphElement>("code");
+const params = new URLSearchParams(location.search);
 
 function log(line: string): void {
   console.log(line); // also read by the conformance driver
   $("log").prepend(`${new Date().toLocaleTimeString()}  ${line}\n`);
 }
 
-const logger: Logger = { debug: () => {}, info: log, warn: (m) => log(`warning: ${m}`) };
+const logger: Logger = { debug: () => {}, info: log, warn: log };
 
-function start(room: string, id: string): void {
+interface Start {
+  room: string;
+  id: string;
+  enrollment: string | undefined;
+  speak: boolean;
+}
+
+function start({ room, id, enrollment, speak }: Start): void {
   form.hidden = true;
   status.textContent = "Connecting…";
+  const locale = params.get("lang") ?? navigator.languages;
   const satellite = new Satellite({
-    core: new URLSearchParams(location.search).get("core") ?? location.origin,
-    manifest: new Manifest({ id, model: "browser", room }, [AUDIO_CAPTURE, AUDIO_PLAYBACK]),
+    core: params.get("core") ?? location.origin,
+    manifest: new Manifest({ id, model: "browser", room }, [AUDIO_CAPTURE, AUDIO_PLAYBACK, IDENTIFY]),
     tokens: new LocalStorageTokenStore(`nestor-satellite:${id}`),
     webrtc: browserWebRtc({ logger }),
     logger,
-    onCode: (shown) => {
-      code.hidden = false;
-      code.textContent = shown;
-      status.textContent = "Confirm this code in Nestor:";
+    locale,
+    pairing: {
+      enrollment,
+      // device_code.display: the code and what to do with it, until the device is paired.
+      display: (shown, text) => {
+        code.hidden = shown === null;
+        code.textContent = shown ?? "";
+        enrollForm.hidden = shown === null;
+        status.textContent = text;
+      },
+      // device_code.speech, when asked for and when this browser can speak.
+      speak: speak ? browserSpeech({ lang: typeof locale === "string" ? locale : (locale[0] ?? "en") }) : undefined,
+      accepts: ["enrollment.input"],
     },
     body: {
       behavior: (behavior) => log(`behavior ${behavior}`),
       expression: (expression, intensity) => log(`expression ${expression} (${intensity})`),
       beat: () => log("beat"),
+      identify: () => {
+        log("identify");
+        document.body.classList.remove("identify");
+        void document.body.offsetWidth; // restart the animation
+        document.body.classList.add("identify");
+      },
       connected: (up) => {
         code.hidden = true;
+        enrollForm.hidden = true;
         status.textContent = up ? `Connected in ${room}.` : "Reconnecting…";
         log(up ? "connected" : "disconnected");
       },
     },
+  });
+  enrollForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const field = enrollForm.elements.namedItem("code") as HTMLInputElement;
+    satellite.enroll(field.value, "enrollment.input").then((outcome) => {
+      log(`enrollment code: ${outcome.status}`);
+      if (outcome.status !== "approved") field.select();
+    }, log);
   });
   satellite.run().catch((error: unknown) => {
     status.textContent = `Stopped: ${error instanceof Error ? error.message : String(error)}`;
@@ -56,9 +99,20 @@ function start(room: string, id: string): void {
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   const data = new FormData(form);
-  start(String(data.get("room")), String(data.get("id")));
+  const enrollment = String(data.get("enrollment") ?? "").trim();
+  start({
+    room: String(data.get("room")),
+    id: String(data.get("id")),
+    enrollment: enrollment === "" ? undefined : enrollment,
+    speak: data.has("speak"),
+  });
 });
 
-// `?auto&room=salon&id=tab` starts at once (tests; browsers then need autoplay allowed).
-const params = new URLSearchParams(location.search);
-if (params.has("auto")) start(params.get("room") ?? "salon", params.get("id") ?? "navigateur");
+if (params.has("auto")) {
+  start({
+    room: params.get("room") ?? "salon",
+    id: params.get("id") ?? "navigateur",
+    enrollment: params.get("pairing_uri") ?? undefined,
+    speak: params.has("speak"),
+  });
+}

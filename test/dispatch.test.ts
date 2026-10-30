@@ -23,12 +23,14 @@ describe("the dispatcher", () => {
       behavior: (b) => calls.push(["behavior", b]),
       expression: (e, i) => calls.push(["expression", e, i]),
       beat: () => calls.push(["beat"]),
+      identify: () => calls.push(["identify"]),
     });
     handle(message("intent.behavior", { behavior: "listening" }, "i-1"));
     handle(message("intent.expression", { expression: "excited", intensity: 0.7 }, "i-2"));
     handle(message("intent.beat", {}, "i-3"));
-    expect(calls).toEqual([["behavior", "listening"], ["expression", "excited", 0.7], ["beat"]]);
-    expect(replies.map((r) => r.payload.of)).toEqual(["i-1", "i-2", "i-3"]);
+    handle(message("intent.identify", {}, "i-4"));
+    expect(calls).toEqual([["behavior", "listening"], ["expression", "excited", 0.7], ["beat"], ["identify"]]);
+    expect(replies.map((r) => r.payload.of)).toEqual(["i-1", "i-2", "i-3", "i-4"]);
   });
 
   it("acknowledges intents a body does not implement: received is all an ack means", () => {

@@ -102,3 +102,30 @@ class BrowserWebRtc implements WebRtc, AudioBridge {
 function globals(): MediaGlobals {
   return globalThis as MediaGlobals;
 }
+
+/** What `browserSpeech` needs of the Web Speech API (`window.speechSynthesis` fits). */
+export interface SpeechSynthesisLike {
+  speak(utterance: unknown): void;
+  cancel(): void;
+}
+
+interface SpeechGlobals {
+  speechSynthesis?: SpeechSynthesisLike;
+  SpeechSynthesisUtterance?: new (text: string) => { lang: string };
+}
+
+/**
+ * The browser's voice (Web Speech API) as a pairing output: `pairing: { speak: browserSpeech({ lang }) }`
+ * declares `device_code.speech`. `undefined` when this browser cannot speak, so nothing is declared.
+ * `lang` should match the satellite's `locale`.
+ */
+export function browserSpeech(options: { readonly lang?: string } = {}): ((text: string) => void) | undefined {
+  const { speechSynthesis, SpeechSynthesisUtterance: Utterance } = globalThis as SpeechGlobals;
+  if (speechSynthesis === undefined || Utterance === undefined) return undefined;
+  return (text) => {
+    const utterance = new Utterance(text);
+    if (options.lang !== undefined) utterance.lang = options.lang;
+    speechSynthesis.cancel(); // the latest sentence replaces the one still being said
+    speechSynthesis.speak(utterance);
+  };
+}

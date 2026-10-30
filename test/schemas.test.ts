@@ -7,7 +7,17 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
-import { AUDIO_CAPTURE, BEHAVIORS, capability, EXPRESSIONS, Manifest, PERSON_DETECTION, wire } from "../src/index.js";
+import {
+  AUDIO_CAPTURE,
+  BEHAVIORS,
+  capability,
+  EXPRESSIONS,
+  IDENTIFY,
+  Manifest,
+  PAIRING_METHODS,
+  PERSON_DETECTION,
+  wire,
+} from "../src/index.js";
 
 const COPY = new URL("../schemas/", import.meta.url);
 const SERVER = new URL("../../nestor/src/nestor/modules/satellites/schemas/", import.meta.url);
@@ -36,7 +46,8 @@ function validate(data: unknown, name: string): void {
 const MANIFEST = new Manifest({ id: "enceinte-salon", model: "Raspberry Pi 4", room: "salon", brand: "raspberry" }, [
   capability(AUDIO_CAPTURE, { formats: ["opus/48000"] }),
   capability(PERSON_DETECTION, { rate_hz: 10 }),
-]);
+  IDENTIFY,
+]).withPairingMethods(["device_code.display", "enrollment.input", "enrollment.provisioning"]);
 
 it.skipIf(!existsSync(SERVER))("the copied schemas are the server's (refresh them as AGENTS.md says)", () => {
   expect(schemas).toEqual(load(SERVER));
@@ -49,6 +60,11 @@ it("knows every value the core may send", () => {
   };
   expect(field("intent.behavior.json", "behavior")).toEqual({ enum: [...BEHAVIORS] });
   expect(field("intent.expression.json", "expression")).toEqual({ enum: [...EXPRESSIONS] });
+  const manifest = schemas["manifest.json"]?.properties as Record<string, { items: unknown }> | undefined;
+  expect(manifest?.pairing_methods?.items).toEqual({ enum: [...PAIRING_METHODS] });
+  const error = schemas["pairing.error.json"]?.properties as Record<string, unknown> | undefined;
+  expect(error?.error).toEqual({ enum: [...wire.PAIRING_ERRORS] });
+  expect(error?.reason).toEqual({ enum: [...wire.REFUSAL_REASONS] });
 });
 
 it("knows every message type of the protocol", () => {
@@ -58,9 +74,15 @@ it("knows every message type of the protocol", () => {
     "intent.beat.json",
     "intent.behavior.json",
     "intent.expression.json",
+    "intent.identify.json",
     "manifest.json",
     "observation.person.detected.json",
     "observation.speech.activity.json",
+    "pairing.enrollment.json",
+    "pairing.error.json",
+    "pairing.request.json",
+    "pairing.state.json",
+    "pairing.ticket.json",
     "welcome.json",
   ]);
 });
@@ -68,12 +90,23 @@ it("knows every message type of the protocol", () => {
 describe("what the SDK sends follows the schema", () => {
   it.each([
     ["hello", wire.hello(MANIFEST)],
-    ["hello without brand nor sdk", wire.hello(new Manifest({ id: "a", model: "m", room: "r" }, [], null))],
+    ["hello without brand nor sdk", wire.hello(new Manifest({ id: "a", model: "m", room: "r" }, [], { sdk: null }))],
     ["ack", wire.ack("intent-1")],
     ["observation.person.detected", wire.personDetected(2, 0.75)],
     ["observation.speech.activity", wire.speechActivity(true)],
   ])("%s", (_name, message) => {
     validate(message, `${message.type}.json`);
+  });
+
+  it.each([
+    ["pairing.request.json", wire.pairingRequest(MANIFEST)],
+    [
+      "pairing.request.json",
+      wire.pairingRequest(MANIFEST, wire.enrollmentProof("K7QF2M9X", "enrollment.provisioning")),
+    ],
+    ["pairing.enrollment.json", wire.enrollmentProof("K7QF2M9X", "enrollment.qr")],
+  ])("%s", (name, body) => {
+    validate(body, name);
   });
 });
 
@@ -85,8 +118,31 @@ describe("what the schema allows the core to send, the SDK reads", () => {
     { type: "intent.expression", id: "m-3", at, payload: { expression: "ahem", intensity: 0 } },
     { type: "intent.expression", id: "m-4", at: "2026-10-30T12:00:00Z", payload: { expression: "whisper" } },
     { type: "intent.beat", id: "m-5", at, payload: {} },
+    { type: "intent.identify", id: "m-6", at, payload: {} },
   ])("$type ($id)", (message) => {
     validate(message, `${message.type}.json`);
     expect(wire.parse(message).message?.type).toBe(message.type);
+  });
+
+  const expires_at = "2026-10-30T12:10:00+00:00";
+  it.each([
+    [
+      "pairing.ticket.json",
+      { pairing_id: "p-1", status: "pending", expires_at, device_code: "042917" },
+      wire.parseTicket,
+    ],
+    ["pairing.ticket.json", { pairing_id: "p-1", status: "approved", expires_at }, wire.parseTicket],
+    ["pairing.state.json", { status: "pending", identify: true }, wire.parseState],
+    [
+      "pairing.state.json",
+      { status: "approved", token: "nst2_x", device_id: "a", room: "salon", capabilities: ["device.identify"] },
+      wire.parseState,
+    ],
+    ["pairing.state.json", { status: "expired" }, wire.parseState],
+    ["pairing.error.json", { error: "enrollment_refused", detail: "no", reason: "used" }, wire.parseError],
+    ["pairing.error.json", { error: "too_many_attempts", detail: "wait", retry_after_s: 3 }, wire.parseError],
+  ] as const)("%s %j", (name, body, read) => {
+    validate(body, name);
+    expect(read(body)).not.toBeNull();
   });
 });

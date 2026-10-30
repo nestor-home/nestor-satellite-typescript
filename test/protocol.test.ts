@@ -21,15 +21,16 @@ describe("a manifest", () => {
       AUDIO_PLAYBACK,
     ]);
     expect(manifest.toJSON()).toEqual({
-      protocol: "nestor.satellite/1",
+      protocol: "nestor.satellite/2",
       device: { id: "enceinte-salon", model: "raspberry-pi-4", room: "salon", brand: "raspberry" },
       capabilities: [{ name: "audio.capture", formats: ["opus/48000"] }, { name: "audio.playback" }],
+      pairing_methods: ["enrollment.provisioning"],
       sdk: { name: "@nestor-home/satellite", version: SDK_VERSION },
     });
   });
 
   it("leaves out the optional brand and, when asked, the SDK", () => {
-    const json = new Manifest(SALON, [], null).toJSON();
+    const json = new Manifest(SALON, [], { sdk: null }).toJSON();
     expect(json.device).toEqual(SALON);
     expect("sdk" in json).toBe(false);
   });
@@ -57,7 +58,21 @@ describe("a manifest", () => {
     expect(() => Manifest.of(SALON, AUDIO_CAPTURE, AUDIO_CAPTURE)).toThrow(/twice/);
     const many = Array.from({ length: 33 }, (_, i) => `family.feature_${i}`);
     expect(() => Manifest.of(SALON, ...many)).toThrow(/at most 32/);
-    expect(() => new Manifest(SALON, [], { name: "", version: "1" })).toThrow(/sdk/);
+    expect(() => new Manifest(SALON, [], { sdk: { name: "", version: "1" } })).toThrow(/sdk/);
+  });
+});
+
+describe("pairing methods", () => {
+  it("are listed in the manifest, configuration alone by default", () => {
+    const manifest = Manifest.of(SALON).withPairingMethods(["device_code.speech", "enrollment.provisioning"]);
+    expect(manifest.toJSON().pairing_methods).toEqual(["device_code.speech", "enrollment.provisioning"]);
+    expect(Manifest.of(SALON).pairingMethods).toEqual(["enrollment.provisioning"]);
+  });
+
+  it("are at least one, each once, all known", () => {
+    expect(() => new Manifest(SALON, [], { pairingMethods: [] })).toThrow(ProtocolError);
+    expect(() => Manifest.of(SALON).withPairingMethods(["enrollment.qr", "enrollment.qr"])).toThrow(ProtocolError);
+    expect(() => Manifest.of(SALON).withPairingMethods(["telepathy" as never])).toThrow(/telepathy/);
   });
 });
 

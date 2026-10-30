@@ -11,4 +11,6 @@ export default defineConfig({
     alias: { "@nestor-home/satellite": fileURLToPath(new URL("../../src/index.ts", import.meta.url)) },
   },
   server: { proxy: { "/satellites": { target: core, changeOrigin: true } } },
+  // Bundled when the server starts rather than discovered on the first page load (which reloads it).
+  optimizeDeps: { include: ["@fluent/bundle"] },
 });

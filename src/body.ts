@@ -15,6 +15,12 @@ export interface Body {
   expression?(expression: Expression, intensity: number): void;
   /** A word is being played: a light speech accent. Needs `motion.head`. */
   beat?(): void;
+  /**
+   * Make the device noticed for a few seconds (blink, wiggle, chime, flash the screen), so a person
+   * tells it apart from others: asked while it waits to be paired, and once paired
+   * (`intent.identify`). A driver that implements it declares `device.identify`.
+   */
+  identify?(): void;
   /** The core was just heard from (a message or audio). A watchdog can rest the device when heartbeats stop. */
   heartbeat?(): void;
   /** The link to the core came up (welcomed) or went down. */
