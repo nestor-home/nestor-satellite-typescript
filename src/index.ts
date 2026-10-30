@@ -9,6 +9,7 @@
 export type { Body } from "./body.js";
 export { type AudioElementLike, type BrowserWebRtcOptions, browserWebRtc } from "./browser.js";
 export { Dispatcher, type Outcome } from "./dispatch.js";
+export { LOCALES, type Locale, type MessageArgs, type MessageId, Messages, negotiateLocale } from "./i18n.js";
 export { type Logger, quietLogger } from "./log.js";
 export { type Fetch, HttpError, type PairOptions, pair, showCode } from "./pairing.js";
 export {
