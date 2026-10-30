@@ -6,6 +6,7 @@
 export type { Body } from "./body.js";
 export { Dispatcher, type Outcome } from "./dispatch.js";
 export { type Logger, quietLogger } from "./log.js";
+export { type Fetch, HttpError, type PairOptions, pair, showCode } from "./pairing.js";
 export {
   AUDIO_CAPTURE,
   AUDIO_PLAYBACK,
@@ -30,5 +31,12 @@ export {
   type Sdk,
   SPEECH_ACTIVITY,
 } from "./protocol.js";
+export {
+  LocalStorageTokenStore,
+  type MaybePromise,
+  MemoryTokenStore,
+  type StorageLike,
+  type TokenStore,
+} from "./tokens.js";
 export { SDK_NAME, SDK_VERSION } from "./version.js";
 export * as wire from "./wire.js";
