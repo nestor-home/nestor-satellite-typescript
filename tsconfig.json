@@ -16,7 +16,8 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "@nestor-home/satellite": ["./src/index.ts"] }
   },
   "include": ["src", "test", "scripts", "examples", "vitest.config.ts", "vitest.conformance.config.ts"]
 }
