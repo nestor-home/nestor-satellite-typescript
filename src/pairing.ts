@@ -162,6 +162,8 @@ export class Pairing {
   private pendingId: string | null = null;
   private shown: string | null = null;
   private wake: (() => void) | null = null;
+  /** An enrollment code was handed in since the last pause: the next one ends at once. */
+  private handedIn = false;
   private active = false;
 
   constructor(options: PairingOptions) {
@@ -211,6 +213,7 @@ export class Pairing {
     return new Promise((settle) => {
       const proof: Proof = { code: read.code, hash: null, method, settle, notBefore: 0 };
       this.proofs.push(proof);
+      this.handedIn = true;
       this.wake?.();
       void this.refusedBefore(proof); // settled at once when refused before, even with no pairing running
     });
@@ -498,17 +501,23 @@ export class Pairing {
     return { ok: false, error, waitS: 0 };
   }
 
-  /** Wait between polls; an enrollment code handed in ends the wait at once. */
+  /** Wait between polls; an enrollment code handed in (even during the poll before) ends the wait at once. */
   private pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(signal.reason);
         return;
       }
+      if (this.handedIn) {
+        this.handedIn = false;
+        resolve();
+        return;
+      }
       const finish = (then: () => void) => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", aborted);
         this.wake = null;
+        this.handedIn = false;
         then();
       };
       const aborted = () => finish(() => reject(signal?.reason));
