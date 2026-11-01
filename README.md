@@ -3,7 +3,7 @@
 TypeScript SDK to write **satellites** for [Nestor](https://nestorhome.dev), in browsers and in
 Node: devices (a tab on a wall tablet, a Raspberry Pi speaker, a robot) that pair with a Nestor
 server, stream audio over WebRTC, carry out its intents and report what they observe, following the
-`nestor.satellite/2` protocol. It does not depend on the Nestor server.
+`nestor.satellite/1` protocol. It does not depend on the Nestor server.
 
 **Documentation:** [nestorhome.dev/docs/sdks/typescript](https://nestorhome.dev/docs/sdks/typescript/)
 (Node, pairing options, QR codes, the command, conformance).

@@ -103,10 +103,10 @@ describe("reading the pairing endpoints", () => {
   it("reads a state, its token and whether to identify", () => {
     expect(wire.parseState({ status: "pending", identify: true })).toMatchObject({ status: "pending", identify: true });
     expect(
-      wire.parseState({ status: "approved", token: "nst2_x", device_id: "a", room: "r", capabilities: [] }),
+      wire.parseState({ status: "approved", token: "nst1_x", device_id: "a", room: "r", capabilities: [] }),
     ).toEqual({
       status: "approved",
-      token: "nst2_x",
+      token: "nst1_x",
       deviceId: "a",
       room: "r",
       capabilities: new Set(),

@@ -1,5 +1,5 @@
 /**
- * The codes of `nestor.satellite/2` pairing, and the pairing URI that carries an enrollment code.
+ * The codes of `nestor.satellite/1` pairing, and the pairing URI that carries an enrollment code.
  *
  * Device code: 6 decimal digits the core gives the device, which presents them (screen, voice, log)
  * for a person to type in the admin.

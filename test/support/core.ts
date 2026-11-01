@@ -1,5 +1,5 @@
 /**
- * A fake core for behaviour tests: the `nestor.satellite/2` pairing and offer endpoints over real
+ * A fake core for behaviour tests: the `nestor.satellite/1` pairing and offer endpoints over real
  * HTTP (a local server). Answered offers become sessions handed out by `sessions`; `FakeWebRtc`
  * (`./webrtc.ts`) answers them in-process.
  */
@@ -70,7 +70,7 @@ interface FakePairing {
 }
 
 /**
- * The core's side of `nestor.satellite/2`: pairing endpoints (device codes, enrollment codes,
+ * The core's side of `nestor.satellite/1`: pairing endpoints (device codes, enrollment codes,
  * identify, rate limits) and the offer endpoint, over real HTTP on a local port.
  */
 export class FakeCore<S = never> {
@@ -166,7 +166,7 @@ export class FakeCore<S = never> {
       this.requestTimes.push(Date.now());
       const manifest = body.manifest as Json | undefined;
       if (this.protocolUnsupported) return void refuse("protocol_unsupported");
-      if (manifest?.protocol !== "nestor.satellite/2") return void refuse("invalid_request");
+      if (manifest?.protocol !== "nestor.satellite/1") return void refuse("invalid_request");
       const code = body.enrollment_code as string | undefined;
       if (code !== undefined && this.limited > 0) return void limited();
       if (code !== undefined && this.codes.get(code) !== "valid") {
@@ -207,7 +207,7 @@ export class FakeCore<S = never> {
       if (pairing.status === "approved") {
         pairing.status = "claimed";
         this.issued += 1;
-        const token = `nst2_token-${this.issued}`;
+        const token = `nst1_token-${this.issued}`;
         this.tokens.set(pairing.deviceId, token);
         return void reply(200, {
           status: "approved",

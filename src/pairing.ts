@@ -1,5 +1,5 @@
 /**
- * Pairing (`nestor.satellite/2`, rules P1 to P7): get a token from the core with either proof.
+ * Pairing (`nestor.satellite/1`, rules P1 to P7): get a token from the core with either proof.
  *
  *     POST /satellites/pairings                         manifest [+ enrollment code] → ticket
  *     POST /satellites/pairings/{pairing_id}/enrollment enrollment code              → state

@@ -1,6 +1,6 @@
 /**
  * Write a Nestor satellite in TypeScript: pair with the core, stream audio over WebRTC, carry out
- * its intents and report observations, following the `nestor.satellite/2` protocol.
+ * its intents and report observations, following the `nestor.satellite/1` protocol.
  *
  * This entry point runs anywhere (browsers, Node, workers): it touches no platform API until a
  * `WebRtc` adapter does. Node's adapter, audio and token file live in `@nestor-home/satellite/node`.

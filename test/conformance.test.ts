@@ -1,5 +1,5 @@
 /**
- * The Nestor server's black-box conformance suite (realtime profile, `nestor.satellite/2`) against
+ * The Nestor server's black-box conformance suite (realtime profile, `nestor.satellite/1`) against
  * this SDK, through the published server's `nestor satellites conformance` command: the built CLI
  * with the speaker profile (no body), and the browser example in a headless Chromium. The suite
  * launches each once per scenario, with a fresh `{state}` folder and, for the enrollment scenarios,

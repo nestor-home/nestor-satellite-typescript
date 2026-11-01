@@ -59,7 +59,7 @@ describe("with no enrollment code", () => {
     const display = (code: string | null, text: string) => void s.shown.push([code, text]);
     const speak = (text: string) => void s.said.push(text);
     const paired = await pairing({ seen: s, outputs: { display, speak } }).run();
-    expect(paired.token).toBe("nst2_token-1");
+    expect(paired.token).toBe("nst1_token-1");
     expect(core.pairRequests).toEqual([{ manifest: MANIFEST.toJSON() }]);
     expect(s.shown).toEqual([
       ["042137", "Type this code in Nestor to add this device."],
@@ -139,7 +139,7 @@ describe("with no enrollment code", () => {
     const polls = core.polls.length;
     await until(() => core.polls.length > polls);
     core.approve();
-    await expect(running).resolves.toMatchObject({ token: "nst2_token-1" });
+    await expect(running).resolves.toMatchObject({ token: "nst1_token-1" });
   });
 
   it("keeps pairing when an output fails", async () => {
@@ -148,7 +148,7 @@ describe("with no enrollment code", () => {
     const display = () => {
       throw new Error("screen unplugged");
     };
-    await expect(pairing({ seen: s, outputs: { display } }).run()).resolves.toMatchObject({ token: "nst2_token-1" });
+    await expect(pairing({ seen: s, outputs: { display } }).run()).resolves.toMatchObject({ token: "nst1_token-1" });
     expect(s.logs.join("\n")).toMatch(/screen unplugged/);
   });
 });
@@ -159,7 +159,7 @@ describe("with an enrollment code", () => {
     const s = seen();
     const display = (code: string | null, text: string) => void s.shown.push([code, text]);
     const paired = await pairing({ seen: s, enrollment: URI(core), outputs: { display } }).run();
-    expect(paired.token).toBe("nst2_token-1");
+    expect(paired.token).toBe("nst1_token-1");
     expect(core.pairRequests).toEqual([
       { manifest: MANIFEST.toJSON(), enrollment_code: CODE, method: "enrollment.provisioning" },
     ]);
@@ -205,13 +205,13 @@ describe("a refused enrollment code, kept by the device", () => {
     const path = join(await mkdtemp(join(tmpdir(), "nestor-")), "state.json");
     const store = new FileTokenStore(path);
     await pairing({ enrollment: CODE, store }).run();
-    await store.save(core.url, MANIFEST.device.id, "nst2_token-1");
+    await store.save(core.url, MANIFEST.device.id, "nst1_token-1");
     const text = await readFile(path, "utf8");
     expect(text).not.toMatch(/K7QF-?2M9X/i);
     expect(JSON.parse(text)).toEqual({
       core: core.url,
       device_id: MANIFEST.device.id,
-      token: "nst2_token-1",
+      token: "nst1_token-1",
       refused: { [await hashEnrollmentCode(CODE)]: "used" },
     });
   });
@@ -236,7 +236,7 @@ describe("a refused enrollment code, kept by the device", () => {
     const store = new MemoryTokenStore();
     const hash = await hashEnrollmentCode(CODE);
     store.refuse("http://c", "salon", hash, "used");
-    store.save("http://c", "salon", "nst2_x");
+    store.save("http://c", "salon", "nst1_x");
     store.forget();
     expect(store.load("http://c", "salon")).toBeNull();
     expect(store.refused("http://c", "salon")).toEqual({ [hash]: "used" });
@@ -250,7 +250,7 @@ describe("a refused enrollment code, kept by the device", () => {
       refuse: () => Promise.reject(new Error("disk full")),
     };
     await expect(pairing({ seen: s, enrollment: CODE, store: broken }).run()).resolves.toMatchObject({
-      token: "nst2_token-1",
+      token: "nst1_token-1",
     });
     expect(s.logs.join("\n")).toMatch(/disk unreadable[\s\S]*disk full/);
   });
@@ -265,7 +265,7 @@ describe("an enrollment code handed in while it waits", () => {
     const running = pairs.run();
     await until(() => pairs.pending);
     await expect(pairs.enroll("k7qf 2m9x", "enrollment.qr")).resolves.toEqual({ status: "approved" });
-    await expect(running).resolves.toMatchObject({ token: "nst2_token-1" });
+    await expect(running).resolves.toMatchObject({ token: "nst1_token-1" });
     expect(core.enrollments).toEqual([{ enrollment_code: CODE, method: "enrollment.qr" }]);
     expect(s.shown.at(-1)).toEqual([null, "Paired with Nestor."]);
   });
@@ -278,7 +278,7 @@ describe("an enrollment code handed in while it waits", () => {
     await new Promise((resolve) => setTimeout(resolve, 50)); // the device waits for its next poll
     core.approve(); // a person typed the device code first
     await expect(pairs.enroll(CODE)).resolves.toEqual({ status: "not_pending" });
-    await expect(running).resolves.toMatchObject({ token: "nst2_token-1" });
+    await expect(running).resolves.toMatchObject({ token: "nst1_token-1" });
     expect(core.enrollments).toHaveLength(1);
   });
 
@@ -297,7 +297,7 @@ describe("an enrollment code handed in while it waits", () => {
       "The enrollment code K7QF-2M9X has expired. Type this code in Nestor to add this device.",
     ]);
     core.approve();
-    await expect(running).resolves.toMatchObject({ token: "nst2_token-1" });
+    await expect(running).resolves.toMatchObject({ token: "nst1_token-1" });
   });
 
   it("that is no code is not sent", async () => {
