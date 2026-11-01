@@ -1,8 +1,8 @@
 /**
  * `nestor-satellite run`: this machine's microphone and speaker as a satellite of a Nestor core.
  *
- *     nestor-satellite run --core http://nestor.local:7860 --room salon
- *     NESTOR_PAIRING_URI=nestor+http://nestor.local:7860/?code=K7QF2M9X nestor-satellite run --room salon
+ *     nestor-satellite run --core http://nestor.local:8471 --room salon
+ *     NESTOR_PAIRING_URI=nestor+http://nestor.local:8471/?code=K7QF2M9X nestor-satellite run --room salon
  *
  * With an enrollment code (`--pairing-uri`, `--pairing-code`, or the same in `NESTOR_PAIRING_URI`,
  * `NESTOR_PAIRING_CODE`), the first run pairs at once; without one, it says a device code to type in
@@ -33,7 +33,7 @@ const USAGE = `Usage: nestor-satellite run --core <url> --room <room> [options]
 Run this machine's microphone and speaker as a Nestor satellite.
 
 Options:
-  --core <url>          the core's voice server, e.g. http://nestor.local:7860
+  --core <url>          the core's voice server, e.g. http://nestor.local:8471
                         (required unless a pairing URI gives it)
   --room <slug>         the room the satellite is in: salon, cuisine… (required)
   --pairing-uri <uri>   pair with this pairing URI, made in Nestor when adding a satellite:

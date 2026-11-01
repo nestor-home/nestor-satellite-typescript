@@ -54,7 +54,7 @@ button.onclick = () => satellite.run(); // a click: browsers only play sound aft
 In Node, the machine's microphone and speaker, with nothing to write:
 
 ```bash
-NESTOR_PAIRING_URI='nestor+http://nestor.local:7860/?code=K7QF2M9X' npx nestor-satellite run --room salon
+NESTOR_PAIRING_URI='nestor+http://nestor.local:8471/?code=K7QF2M9X' npx nestor-satellite run --room salon
 ```
 
 The recorded voice that says device codes is shared under CC BY 4.0: see

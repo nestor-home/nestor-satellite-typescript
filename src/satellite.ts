@@ -1,7 +1,7 @@
 /**
  * A satellite's life: pair once, then stay connected to the core, reconnecting when the link drops.
  *
- *     const satellite = new Satellite({ core: "http://nestor.local:7860", manifest, tokens, webrtc, body });
+ *     const satellite = new Satellite({ core: "http://nestor.local:8471", manifest, tokens, webrtc, body });
  *     await satellite.run(signal); // until the signal aborts
  *
  * Pairing (`./pairing.ts`) uses the enrollment code it was configured with, else presents its device
@@ -91,7 +91,7 @@ export interface PairingSetup extends Omit<PairingOutputs, "voice"> {
 }
 
 export interface SatelliteOptions {
-  /** The core's voice server, e.g. `http://nestor.local:7860`. */
+  /** The core's voice server, e.g. `http://nestor.local:8471`. */
   readonly core: string;
   /** What the device is and can do; its `pairing_methods` are set from `pairing`. */
   readonly manifest: Manifest;

@@ -13,14 +13,14 @@ import { languagesFromEnv, provisioningFromEnv } from "../src/node/index.js";
 import { SDK_VERSION } from "../src/version.js";
 
 const NO_ENV = {};
-const URI = "nestor+http://nestor.local:7860/?code=K7QF2M9X";
+const URI = "nestor+http://nestor.local:8471/?code=K7QF2M9X";
 const quiet = { debug() {}, info() {}, warn() {} };
 
 describe("nestor-satellite run", () => {
   it("needs a core and a room, and fills in the rest", () => {
-    const args = parse(["run", "--core", "http://nestor.local:7860", "--room", "salon"], NO_ENV);
+    const args = parse(["run", "--core", "http://nestor.local:8471", "--room", "salon"], NO_ENV);
     expect(args).toMatchObject({
-      core: "http://nestor.local:7860",
+      core: "http://nestor.local:8471",
       room: "salon",
       id: defaultId(),
       model: "node-satellite",
@@ -94,9 +94,9 @@ describe("pairing from the command line or the environment", () => {
     parse(["run", "--room", "salon", ...argv], env) as Arguments;
 
   it("takes the core and the enrollment code from a pairing URI", () => {
-    expect(run(["--pairing-uri", URI])).toMatchObject({ core: "http://nestor.local:7860", enrollment: "K7QF2M9X" });
+    expect(run(["--pairing-uri", URI])).toMatchObject({ core: "http://nestor.local:8471", enrollment: "K7QF2M9X" });
     expect(run([], { NESTOR_PAIRING_URI: URI })).toMatchObject({
-      core: "http://nestor.local:7860",
+      core: "http://nestor.local:8471",
       enrollment: "K7QF2M9X",
     });
   });
@@ -124,14 +124,14 @@ describe("pairing from the command line or the environment", () => {
 
   it("sends the configured code with its first request", () => {
     const satellite = build(run(["--pairing-uri", URI, "--input", "none", "--output", "none"]), quiet);
-    expect(satellite.core).toBe("http://nestor.local:7860");
+    expect(satellite.core).toBe("http://nestor.local:8471");
     // No speaker: nothing to say the device code with, should the enrollment code be refused.
     expect(satellite.manifest.pairingMethods).toEqual(["enrollment.provisioning"]);
   });
 
   it("reads the same variables for drivers of its own", () => {
     expect(provisioningFromEnv({ NESTOR_PAIRING_URI: URI })).toEqual({
-      core: "http://nestor.local:7860",
+      core: "http://nestor.local:8471",
       enrollment: "K7QF2M9X",
     });
     expect(provisioningFromEnv({ NESTOR_PAIRING_URI: "" })).toBeNull();

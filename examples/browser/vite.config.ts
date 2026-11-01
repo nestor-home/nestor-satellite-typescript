@@ -2,8 +2,8 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 // The core does not answer cross-origin requests: the dev server forwards `/satellites` to it, so
-// the page talks to its own origin. `NESTOR_CORE=http://nestor.local:7860 pnpm example`.
-const core = process.env.NESTOR_CORE ?? "http://localhost:7860";
+// the page talks to its own origin. `NESTOR_CORE=http://nestor.local:8471 pnpm example`.
+const core = process.env.NESTOR_CORE ?? "http://localhost:8471";
 
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),

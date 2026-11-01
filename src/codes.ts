@@ -8,7 +8,7 @@
  * the device (configured, typed or scanned). Reading one back forgives case, dashes, spaces and the
  * letters Crockford maps to digits (O → 0, I and L → 1).
  *
- * Pairing URI: `nestor+http://nestor.local:7860/?code=K7QF2M9X`, the core's base URL prefixed with
+ * Pairing URI: `nestor+http://nestor.local:8471/?code=K7QF2M9X`, the core's base URL prefixed with
  * `nestor+`, and the enrollment code.
  */
 
@@ -37,7 +37,7 @@ export function groupEnrollmentCode(code: string): string {
 }
 
 export interface PairingUri {
-  /** The core's base URL, e.g. `http://nestor.local:7860`. */
+  /** The core's base URL, e.g. `http://nestor.local:8471`. */
   readonly core: string;
   /** The enrollment code, canonical form. */
   readonly code: string;

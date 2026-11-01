@@ -9,7 +9,7 @@ import { readEnrollment } from "../src/index.js";
 import { build, parse } from "../src/node/cli.js";
 import { type Camera, cameraQrScanner, type Picture, readQrCodes } from "../src/qr/index.js";
 
-const URI = "nestor+http://192.168.1.20:7860/?code=K7QF2M9X";
+const URI = "nestor+http://192.168.1.20:8471/?code=K7QF2M9X";
 
 /**
  * A camera frame showing `text` as a QR code: `scale` pixels a module, on a grey, noisy background,
@@ -54,7 +54,7 @@ describe("reading a QR code", () => {
   it("finds the pairing URI in a camera frame, and the enrollment code in it", async () => {
     const texts = await readQrCodes(await photo(URI));
     expect(texts).toEqual([URI]);
-    expect(readEnrollment(texts[0] ?? "")).toEqual({ core: "http://192.168.1.20:7860", code: "K7QF2M9X" });
+    expect(readEnrollment(texts[0] ?? "")).toEqual({ core: "http://192.168.1.20:8471", code: "K7QF2M9X" });
   });
 
   it("finds nothing in a frame without a QR code", async () => {
