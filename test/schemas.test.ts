@@ -127,7 +127,7 @@ describe("what the schema allows the core to send, the SDK reads", () => {
     ["pairing.state.json", { status: "pending", identify: true }, wire.parseState],
     [
       "pairing.state.json",
-      { status: "approved", token: "nst2_x", device_id: "a", room: "salon", capabilities: ["device.identify"] },
+      { status: "approved", token: "nst1_x", device_id: "a", room: "salon", capabilities: ["device.identify"] },
       wire.parseState,
     ],
     ["pairing.state.json", { status: "expired" }, wire.parseState],

@@ -1,12 +1,12 @@
 /**
- * The values of the satellite protocol `nestor.satellite/2`: a device, what it can do, how it can
+ * The values of the satellite protocol `nestor.satellite/1`: a device, what it can do, how it can
  * be paired, and the intents it receives. They mirror the JSON Schemas shipped in `schemas/`,
  * published by the server.
  */
 
 import { SDK_NAME, SDK_VERSION } from "./version.js";
 
-export const PROTOCOL = "nestor.satellite/2";
+export const PROTOCOL = "nestor.satellite/1";
 
 // Capabilities the core knows today; a driver may declare others (`family.feature`).
 export const AUDIO_CAPTURE = "audio.capture";
@@ -49,7 +49,7 @@ export type PairingMethod = (typeof PAIRING_METHODS)[number];
 export const ENROLLMENT_METHODS = ["enrollment.input", "enrollment.provisioning", "enrollment.qr"] as const;
 export type EnrollmentMethod = (typeof ENROLLMENT_METHODS)[number];
 
-/** Something that does not follow `nestor.satellite/2`. */
+/** Something that does not follow `nestor.satellite/1`. */
 export class ProtocolError extends Error {
   override name = "ProtocolError";
 }

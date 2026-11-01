@@ -19,7 +19,7 @@ Dependencies are pinned to exact versions (`pnpm add -E`); commit `pnpm-lock.yam
 
 ```text
 src/              the core: runs anywhere, imports no platform API
-├── protocol.ts   values of nestor.satellite/2: Device, Capability, Manifest, pairing methods, Behavior…
+├── protocol.ts   values of nestor.satellite/1: Device, Capability, Manifest, pairing methods, Behavior…
 ├── codes.ts      enrollment codes (Crockford base32) and pairing URIs (nestor+http://…/?code=…)
 ├── wire.ts       the JSON envelope and the pairing bodies: what the satellite sends, strict parsing of the core's
 ├── dispatch.ts   intents to the Body (identify included), acks, welcome, hang-up

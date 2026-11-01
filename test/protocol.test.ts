@@ -21,7 +21,7 @@ describe("a manifest", () => {
       AUDIO_PLAYBACK,
     ]);
     expect(manifest.toJSON()).toEqual({
-      protocol: "nestor.satellite/2",
+      protocol: "nestor.satellite/1",
       device: { id: "enceinte-salon", model: "raspberry-pi-4", room: "salon", brand: "raspberry" },
       capabilities: [{ name: "audio.capture", formats: ["opus/48000"] }, { name: "audio.playback" }],
       pairing_methods: ["enrollment.provisioning"],

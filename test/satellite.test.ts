@@ -99,8 +99,8 @@ describe("a satellite", () => {
     expect(hello).toMatchObject({ type: "hello", payload: { manifest: manifest.toJSON() } });
     expect(core.pairRequests).toEqual([{ manifest: manifest.toJSON() }]);
     expect(codes).toEqual(["042137"]);
-    expect(tokens.load(core.url, DEVICE.id)).toBe("nst2_token-1");
-    expect(core.offers[0]?.authorization).toBe("Bearer nst2_token-1");
+    expect(tokens.load(core.url, DEVICE.id)).toBe("nst1_token-1");
+    expect(core.offers[0]?.authorization).toBe("Bearer nst1_token-1");
   });
 
   it("opens the audio the manifest declares, and releases it when stopped", async () => {
@@ -146,7 +146,7 @@ describe("a satellite", () => {
     const third = await core.sessions.next();
     expect((await third.received.next()).type).toBe("hello");
     expect(codes).toHaveLength(1);
-    expect(new Set(core.offers.map((o) => o.authorization))).toEqual(new Set(["Bearer nst2_token-1"]));
+    expect(new Set(core.offers.map((o) => o.authorization))).toEqual(new Set(["Bearer nst1_token-1"]));
     expect(satellite.connections).toBe(3);
   });
 
@@ -154,13 +154,13 @@ describe("a satellite", () => {
     const tokens = new MemoryTokenStore();
     const webrtc = new FakeWebRtc();
     const core = await FakeCore.start({ webrtc });
-    tokens.save(core.url, DEVICE.id, "nst2_from-another-life");
+    tokens.save(core.url, DEVICE.id, "nst1_from-another-life");
     const { codes } = await start([AUDIO_CAPTURE], { tokens }, core);
     const session = await core.sessions.next();
     await greet(session, []);
-    expect(core.offers.map((o) => o.authorization)).toEqual(["Bearer nst2_from-another-life", "Bearer nst2_token-1"]);
+    expect(core.offers.map((o) => o.authorization)).toEqual(["Bearer nst1_from-another-life", "Bearer nst1_token-1"]);
     expect(codes).toHaveLength(1);
-    expect(tokens.load(core.url, DEVICE.id)).toBe("nst2_token-1");
+    expect(tokens.load(core.url, DEVICE.id)).toBe("nst1_token-1");
   });
 
   it("pairs again when the household revokes it while it is connected", async () => {
@@ -172,7 +172,7 @@ describe("a satellite", () => {
     const second = await core.sessions.next();
     await greet(second, []);
     expect(codes).toHaveLength(2);
-    expect(core.offers.at(-1)?.authorization).toBe("Bearer nst2_token-2");
+    expect(core.offers.at(-1)?.authorization).toBe("Bearer nst1_token-2");
   });
 
   it("drops a connection that is never welcomed, and tries again", async () => {
@@ -318,9 +318,9 @@ describe("pairing", () => {
     await greet(await core.sessions.next(), []);
     expect(core.pairRequests.map((r) => r.enrollment_code)).toEqual(["K7QF2M9X", undefined, undefined]);
     expect(core.offers.map((o) => o.authorization)).toEqual([
-      "Bearer nst2_token-1",
-      "Bearer nst2_token-1",
-      "Bearer nst2_token-2",
+      "Bearer nst1_token-1",
+      "Bearer nst1_token-1",
+      "Bearer nst1_token-2",
     ]);
   });
 
