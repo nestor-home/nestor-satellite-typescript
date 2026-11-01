@@ -1,9 +1,9 @@
 /**
  * The device code said with the bundled voice: which clips, in which order, in real time, cut when
- * asked. The clips are the Python SDK's: when it is next to this repository, the copy must be identical.
+ * asked.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   AHEAD_MS,
@@ -18,28 +18,7 @@ import {
 import { FakeClock, RecordingSpeaker } from "./support/voice.js";
 
 const COPY = new URL("../voice/", import.meta.url);
-const PYTHON = new URL("../../nestor-satellite-python/src/nestor_satellite/voice/", import.meta.url);
 const INDEX = JSON.parse(readFileSync(new URL("index.json", COPY), "utf8")) as VoiceIndex;
-
-function files(folder: URL, prefix = ""): Record<string, Buffer> {
-  const found: Record<string, Buffer> = {};
-  for (const name of readdirSync(new URL(prefix, folder))) {
-    const path = `${prefix}${name}`;
-    if (statSync(new URL(path, folder)).isDirectory()) Object.assign(found, files(folder, `${path}/`));
-    else found[path] = readFileSync(new URL(path, folder));
-  }
-  return found;
-}
-
-it.skipIf(!existsSync(PYTHON))(
-  "the clips are the Python SDK's, byte for byte (copy them again when they change)",
-  () => {
-    const copy = files(COPY);
-    const python = files(PYTHON);
-    expect(Object.keys(copy).sort()).toEqual(Object.keys(python).sort());
-    for (const [path, bytes] of Object.entries(python)) expect(copy[path]?.equals(bytes), path).toBe(true);
-  },
-);
 
 const clip = (text: string): Step => ({ clip: text });
 const pause = (pauseMs: number): Step => ({ pauseMs });

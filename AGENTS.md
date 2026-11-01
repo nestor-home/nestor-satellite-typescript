@@ -49,8 +49,8 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
    `@fluent/bundle`, which runs anywhere. Platform code sits behind the `WebRtc` port.
    `@roamhq/wrtc` stays an optional peer dependency, loaded by `nodeWebRtc` only.
 2. **The server owns the protocol.** `schemas/` is a copy of
-   `../nestor/src/nestor/modules/satellites/schemas/`; `test/schemas.test.ts` fails when they drift.
-   To refresh: `cp ../nestor/src/nestor/modules/satellites/schemas/*.json schemas/`, then adapt
+   `../nestor/src/nestor/modules/satellites/schemas/`. To refresh:
+   `cp ../nestor/src/nestor/modules/satellites/schemas/*.json schemas/`, then adapt
    `wire.ts`/`protocol.ts` until the tests pass. Every message the SDK sends is validated against
    these schemas (ajv).
 3. **Be lenient in what you read, strict in what you send.** An unknown message type from a newer
@@ -77,8 +77,8 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
    `Messages` (`src/locales.ts`, Fluent): add every message to every locale (`test/i18n.test.ts`),
    short and natural, no em-dash. The core's `detail` is English for logs, never shown to people.
 10. **The bundled voice is shared.** `voice/` is a copy of
-    `../nestor-satellite-python/src/nestor_satellite/voice/` (`test/voice.test.ts` fails when they
-    drift; refresh with `cp -R ../nestor-satellite-python/src/nestor_satellite/voice/. voice/`). The
+    `../nestor-satellite-python/src/nestor_satellite/voice/` (refresh with
+    `cp -R ../nestor-satellite-python/src/nestor_satellite/voice/. voice/`). The
     sentence is `device-code-speech`; cutting it into clips follows the Python SDK's algorithm
     exactly. Changing that sentence means recording its clips again (`scripts/voice.py` there).
 
