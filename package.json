@@ -9,7 +9,7 @@
     "webrtc",
     "home automation"
   ],
-  "homepage": "https://nestor.mathislambert.fr",
+  "homepage": "https://nestorhome.dev",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nestor-home/nestor-satellite-typescript.git"
