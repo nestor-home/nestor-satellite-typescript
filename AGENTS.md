@@ -49,8 +49,8 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
    `@fluent/bundle`, which runs anywhere. Platform code sits behind the `WebRtc` port.
    `@roamhq/wrtc` stays an optional peer dependency, loaded by `nodeWebRtc` only.
 2. **The server owns the protocol.** `schemas/` is a copy of
-   `src/nestor/modules/satellites/schemas/` in nestor-home/nestor. To refresh, copy them from a
-   checkout of the server at the version in `.nestor-version`, then adapt
+   the schemas of the `nestor-home` release in `.nestor-version`. To refresh:
+   `uvx --from nestor-home=="$(cat .nestor-version)" nestor satellites schemas --out schemas/`, then adapt
    `wire.ts`/`protocol.ts` until the tests pass. Every message the SDK sends is validated against
    these schemas (ajv).
 3. **Be lenient in what you read, strict in what you send.** An unknown message type from a newer
@@ -60,7 +60,7 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
    browser example in headless Chromium, once per scenario; the enrollment scenarios set
    `NESTOR_PAIRING_URI`, which `scripts/browser-satellite.mjs` passes to the page as `?pairing_uri=`.
    A change to connection, pairing or audio is done when it passes. The standard it checks:
-   `docs/satellite-protocol.md` in nestor-home/nestor (rules N1, P1-P8, I1-I3, W1-W4). See
+   https://nestorhome.dev/docs/satellites/protocol/ (rules N1, P1-P8, I1-I3, W1-W4). See
    [Conformance](#conformance).
 5. **The network loop never waits for the device.** `Body` methods return at once; a failing body is
    logged, never allowed to break the link. Physical safety lives in the driver.
