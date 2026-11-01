@@ -89,7 +89,7 @@ describe("in a browser", () => {
 });
 
 describe("in a file", () => {
-  it("is readable by its owner only, even when an older file was more open", async () => {
+  it("is readable by its owner only, even when the file was made more open", async () => {
     const path = join(await mkdtemp(join(tmpdir(), "nestor-")), "t.json");
     await writeFile(path, "{}", { mode: 0o644 });
     await new FileTokenStore(path).save(CORE, "salon", "nst1_secret");
