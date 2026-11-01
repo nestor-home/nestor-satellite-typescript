@@ -41,7 +41,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "nestor-satellite": "./dist/node/bin.js"
+    "nestor-satellite": "dist/node/bin.js"
   },
   "files": [
     "dist",
