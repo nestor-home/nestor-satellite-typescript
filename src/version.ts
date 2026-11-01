@@ -1,3 +1,3 @@
-/** Sent in the manifest (`sdk`); a test keeps it equal to `package.json`. */
+/** Sent in the manifest (`sdk`). release-please keeps the version equal to `package.json`. */
 export const SDK_NAME = "@nestor-home/satellite";
-export const SDK_VERSION = "0.0.1";
+export const SDK_VERSION = "0.1.0"; // x-release-please-version

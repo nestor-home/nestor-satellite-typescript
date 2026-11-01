@@ -10,6 +10,7 @@ import {
   UsageError,
 } from "../src/node/cli.js";
 import { languagesFromEnv, provisioningFromEnv } from "../src/node/index.js";
+import { SDK_VERSION } from "../src/version.js";
 
 const NO_ENV = {};
 const URI = "nestor+http://nestor.local:7860/?code=K7QF2M9X";
@@ -81,7 +82,7 @@ describe("nestor-satellite run", () => {
     expect(await main(["--version"])).toBe(0);
     expect(await main(["run"])).toBe(2);
     expect(await main(["run", "--core", "http://c", "--room", "Le Salon"])).toBe(2);
-    expect(log).toHaveBeenCalledWith("0.0.1");
+    expect(log).toHaveBeenCalledWith(SDK_VERSION);
     expect(error).toHaveBeenCalledWith(expect.stringContaining("--room is required"));
     log.mockRestore();
     error.mockRestore();

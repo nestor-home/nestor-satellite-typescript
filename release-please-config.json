@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "33dfdf6cd12c384c3d6a3f3467a755e6f6556b73",
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "@nestor-home/satellite",
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true,
+      "extra-files": ["src/version.ts"]
+    }
+  }
+}
