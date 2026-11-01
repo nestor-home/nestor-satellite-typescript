@@ -156,7 +156,7 @@ macOS (x64, arm64) and Windows x64.
 ```bash
 pnpm install
 pnpm lint && pnpm typecheck && pnpm test
-pnpm conformance   # the server's conformance suite; needs ../nestor with its venv
+pnpm conformance   # the published server's conformance suite (uvx; version in .nestor-version)
 ```
 
 ## License
