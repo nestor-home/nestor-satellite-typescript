@@ -54,6 +54,6 @@ export class FileTokenStore implements TokenStore {
     }
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     await writeFile(this.path, text, { mode: 0o600 });
-    await chmod(this.path, 0o600); // an older file may have been more open
+    await chmod(this.path, 0o600); // whoever made the file, only its owner reads it
   }
 }
