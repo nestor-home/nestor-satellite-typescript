@@ -11,21 +11,13 @@ jobs:
     strategy:
       matrix:
         node: ["22", "24"]
-    defaults:
-      run:
-        working-directory: nestor-satellite-typescript
     steps:
       - uses: actions/checkout@v7
-        with:
-          path: nestor-satellite-typescript
       - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: nestor-satellite-typescript/package.json
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
-          cache-dependency-path: nestor-satellite-typescript/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
@@ -33,32 +25,17 @@ jobs:
       - run: pnpm package:check
 
   conformance:
-    # The server's black-box suite against the built CLI and a headless Chromium tab, as subprocesses.
+    # The published server's black-box suite (`nestor satellites conformance`, version in
+    # .nestor-version) against the built CLI and a headless Chromium tab, as subprocesses.
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: nestor-satellite-typescript
     steps:
       - uses: actions/checkout@v7
-        with:
-          path: nestor-satellite-typescript
-      - uses: actions/checkout@v7
-        with:
-          repository: nestor-home/nestor
-          path: nestor
       - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.12"
-      - run: uv sync --extra voice
-        working-directory: nestor
       - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: nestor-satellite-typescript/package.json
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: pnpm
-          cache-dependency-path: nestor-satellite-typescript/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright-core install --with-deps chromium
       - run: pnpm conformance

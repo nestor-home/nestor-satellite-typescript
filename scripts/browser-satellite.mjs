@@ -1,7 +1,8 @@
 // A headless Chromium tab running the browser example as a satellite of `--core <url>`, until
 // SIGTERM. Lets the server's conformance suite check a real browser:
 //
-//     python scripts/conformance.py node scripts/browser-satellite.mjs --core {url}
+//     uvx --from "nestor-home[voice]==$(cat .nestor-version)" nestor satellites conformance -- \
+//         node scripts/browser-satellite.mjs --core {url}
 //
 // Chromium's fake microphone (a beep) and fake permission prompt stand in for a person. The
 // enrollment code a scenario configures (`NESTOR_PAIRING_URI`) reaches the page in its address,
