@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.2.0...v0.3.0) (2026-11-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* the default core URL uses port 8471.
+
+### Bug Fixes
+
+* use the core's port 8471 ([#13](https://github.com/nestor-home/nestor-satellite-typescript/issues/13)) ([a4d59e0](https://github.com/nestor-home/nestor-satellite-typescript/commit/a4d59e042538f10bbd4b797d52fc7ea6e4dbd697))
+
 ## [0.2.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.1.0...v0.2.0) (2026-11-01)
 
 
