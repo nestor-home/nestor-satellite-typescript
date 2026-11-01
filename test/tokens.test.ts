@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { LocalStorageTokenStore, MemoryTokenStore, type StorageLike } from "../src/index.js";
 import { FileTokenStore } from "../src/node/tokens.js";
 
-const CORE = "http://nestor.local:7860";
+const CORE = "http://nestor.local:8471";
 const HASH = "a".repeat(64);
 
 class MapStorage implements StorageLike {
@@ -49,7 +49,7 @@ describe.each([
     expect(await store.load(CORE, "salon")).toBeNull();
     await store.save(CORE, "salon", "nst1_secret");
     expect(await store.load(CORE, "salon")).toBe("nst1_secret");
-    expect(await store.load("http://other:7860", "salon")).toBeNull();
+    expect(await store.load("http://other:8471", "salon")).toBeNull();
     expect(await store.load(CORE, "cuisine")).toBeNull();
   });
 
@@ -69,7 +69,7 @@ describe.each([
     expect(await store.load(CORE, "salon")).toBe("nst1_secret");
     await store.forget();
     expect(await store.refused(CORE, "salon")).toEqual({ [HASH]: "expired", [HASH.replace("a", "b")]: "used" });
-    expect(await store.refused("http://other:7860", "salon")).toEqual({});
+    expect(await store.refused("http://other:8471", "salon")).toEqual({});
   });
 });
 

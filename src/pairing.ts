@@ -102,7 +102,7 @@ export type EnrollOutcome =
   | { readonly status: "invalid" };
 
 export interface PairingOptions {
-  /** The core's base URL, e.g. `http://nestor.local:7860`. */
+  /** The core's base URL, e.g. `http://nestor.local:8471`. */
   readonly core: string;
   /** Sent with each request; its `pairing_methods` must match what this pairing can do. */
   readonly manifest: Manifest;

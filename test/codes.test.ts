@@ -28,22 +28,22 @@ describe("an enrollment code", () => {
 
 describe("a pairing URI", () => {
   it.each([
-    ["nestor+http://nestor.local:7860/?code=K7QF2M9X", "http://nestor.local:7860"],
+    ["nestor+http://nestor.local:8471/?code=K7QF2M9X", "http://nestor.local:8471"],
     [
       "nestor+https://nestor.example.org/satellites-proxy/?code=k7qf-2m9x",
       "https://nestor.example.org/satellites-proxy",
     ],
-    ["NESTOR+HTTP://127.0.0.1:7860?code=K7QF2M9X", "http://127.0.0.1:7860"],
+    ["NESTOR+HTTP://127.0.0.1:8471?code=K7QF2M9X", "http://127.0.0.1:8471"],
   ])("%s gives the core's base URL and the code", (uri, core) => {
     expect(parsePairingUri(uri)).toEqual({ core, code: "K7QF2M9X" });
   });
 
   it.each([
-    "http://nestor.local:7860/?code=K7QF2M9X",
+    "http://nestor.local:8471/?code=K7QF2M9X",
     "nestor+ftp://nestor.local/?code=K7QF2M9X",
-    "nestor+http://nestor.local:7860/",
-    "nestor+http://nestor.local:7860/?code=K7QF2M9X&code=K7QF2M9X",
-    "nestor+http://nestor.local:7860/?code=nope",
+    "nestor+http://nestor.local:8471/",
+    "nestor+http://nestor.local:8471/?code=K7QF2M9X&code=K7QF2M9X",
+    "nestor+http://nestor.local:8471/?code=nope",
     "nestor+http:///?code=K7QF2M9X",
   ])("refuses %s", (uri) => {
     expect(() => parsePairingUri(uri)).toThrow(ProtocolError);

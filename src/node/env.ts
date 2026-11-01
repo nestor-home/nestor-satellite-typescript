@@ -2,7 +2,7 @@
  * What a headless device reads from its environment (P1): the pairing URI or the enrollment code a
  * person configured, and the language to speak to people in.
  *
- *     NESTOR_PAIRING_URI=nestor+http://nestor.local:7860/?code=K7QF2M9X   the core and the code
+ *     NESTOR_PAIRING_URI=nestor+http://nestor.local:8471/?code=K7QF2M9X   the core and the code
  *     NESTOR_PAIRING_CODE=K7QF-2M9X                                     the code (the core given apart)
  */
 
