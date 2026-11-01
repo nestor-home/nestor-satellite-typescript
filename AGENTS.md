@@ -9,7 +9,7 @@ Node. This file is for coding agents: read it before changing anything.
 pnpm install
 pnpm lint && pnpm typecheck && pnpm test   # all three must pass; CI runs them on Node 22 and 24
 pnpm package:check                          # build, publint, attw
-pnpm conformance                            # build, then the server's suite (needs ../nestor/.venv)
+pnpm conformance                            # build, then the published server's suite (needs uvx)
 pnpm format                                 # Biome writes the fixes
 ```
 
@@ -38,7 +38,7 @@ src/              the core: runs anywhere, imports no platform API
 schemas/          JSON Schemas copied from the server (do not edit by hand)
 voice/            the bundled voice's clips, copied from nestor-satellite-python (do not edit by hand)
 examples/browser/ a tab as a satellite (Vite)
-scripts/          conformance.py (the server's suite on any command), browser-satellite.mjs
+scripts/          browser-satellite.mjs (a headless Chromium tab as a satellite, for conformance)
 test/             behaviour tests against a fake core (local HTTP, in-process WebRTC)
 ```
 
@@ -49,18 +49,19 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
    `@fluent/bundle`, which runs anywhere. Platform code sits behind the `WebRtc` port.
    `@roamhq/wrtc` stays an optional peer dependency, loaded by `nodeWebRtc` only.
 2. **The server owns the protocol.** `schemas/` is a copy of
-   `../nestor/src/nestor/modules/satellites/schemas/`. To refresh:
-   `cp ../nestor/src/nestor/modules/satellites/schemas/*.json schemas/`, then adapt
+   `src/nestor/modules/satellites/schemas/` in nestor-home/nestor. To refresh, copy them from a
+   checkout of the server at the version in `.nestor-version`, then adapt
    `wire.ts`/`protocol.ts` until the tests pass. Every message the SDK sends is validated against
    these schemas (ajv).
 3. **Be lenient in what you read, strict in what you send.** An unknown message type from a newer
    core is ignored; a malformed known one is logged and dropped; what the SDK sends is checked first.
-4. **Conformance is the contract.** `pnpm conformance` runs nestor's `check_satellite` on the built
-   CLI (speaker profile: `--input none --output none --token-file {state}/token.json`) and on the
+4. **Conformance is the contract.** `pnpm conformance` runs the server's
+   `nestor satellites conformance` on the built CLI (speaker profile: `--input none --output none --token-file {state}/token.json`) and on the
    browser example in headless Chromium, once per scenario; the enrollment scenarios set
    `NESTOR_PAIRING_URI`, which `scripts/browser-satellite.mjs` passes to the page as `?pairing_uri=`.
    A change to connection, pairing or audio is done when it passes. The standard it checks:
-   `../nestor/docs/satellite-protocol.md` (rules N1, P1-P8, I1-I3, W1-W4).
+   `docs/satellite-protocol.md` in nestor-home/nestor (rules N1, P1-P8, I1-I3, W1-W4). See
+   [Conformance](#conformance).
 5. **The network loop never waits for the device.** `Body` methods return at once; a failing body is
    logged, never allowed to break the link. Physical safety lives in the driver.
 6. **Capabilities are honest.** A declared capability whose device cannot open fails clearly at
@@ -81,6 +82,23 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
     `cp -R ../nestor-satellite-python/src/nestor_satellite/voice/. voice/`). The
     sentence is `device-code-speech`; cutting it into clips follows the Python SDK's algorithm
     exactly. Changing that sentence means recording its clips again (`scripts/voice.py` there).
+
+## Conformance
+
+The suite is the published server's `nestor satellites conformance` command, run through `uvx`; the
+server's version is pinned in `.nestor-version`, the one place to bump it (deliberately, after
+reading the server's changelog). `pnpm conformance` builds, then runs `test/conformance.test.ts`,
+which checks the exit status (0), that no line starts with `FAIL`, and a few named checks. By hand:
+
+```bash
+pnpm build
+uvx --from "nestor-home[voice]==$(cat .nestor-version)" nestor satellites conformance --deadline 20 -- \
+  node dist/node/bin.js run --core {url} --room salon --input none --output none --token-file {state}/token.json
+uvx --from "nestor-home[voice]==$(cat .nestor-version)" nestor satellites conformance --deadline 20 -- \
+  node scripts/browser-satellite.mjs --core {url}
+```
+
+Against a local checkout of the server, replace the `--from` argument by `'../nestor[voice]'`.
 
 ## Code conventions
 
