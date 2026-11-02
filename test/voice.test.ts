@@ -5,16 +5,8 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import {
-  AHEAD_MS,
-  announcement,
-  decodeWav,
-  LOCALES,
-  Messages,
-  SpokenCode,
-  type Step,
-  type VoiceIndex,
-} from "../src/index.js";
+import { LOCALES, Messages } from "../src/index.js";
+import { AHEAD_MS, announcement, decodeWav, SpokenCode, type Step, type VoiceIndex } from "../src/voice/index.js";
 import { FakeClock, RecordingSpeaker } from "./support/voice.js";
 
 const COPY = new URL("../voice/", import.meta.url);

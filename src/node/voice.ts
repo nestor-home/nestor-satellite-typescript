@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { Speaker } from "../voice.js";
+import type { Speaker } from "../voice/spoken.js";
 import type { AudioSink } from "./audio.js";
 
 /** The package's `voice/` folder: two levels up from `src/node/` and from `dist/node/`. */

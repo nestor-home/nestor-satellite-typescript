@@ -31,6 +31,9 @@ protocol-unsupported = This Nestor speaks another version of the satellite proto
 invalid-request = Nestor refused this device's pairing request. Update this device or Nestor.
 token-refused = Nestor no longer knows this device. Pairing it again.
 link-failed = The link to Nestor failed ({ $error }). Trying again.
+link-replaced = This device connected to Nestor again from elsewhere, so this connection stops.
+audio-failed = The audio connection to Nestor failed ({ $error }). Trying again.
+text-not-sent = Not connected to Nestor, so this message was not sent.
 camera-failed = The camera did not open, so this device cannot scan a QR code ({ $error }).
 `;
 
@@ -61,6 +64,9 @@ protocol-unsupported = Ce Nestor parle une autre version du protocole des satell
 invalid-request = Nestor a refusé la demande d'appairage de cet appareil. Mettez à jour cet appareil ou Nestor.
 token-refused = Nestor ne connaît plus cet appareil. Nouvel appairage.
 link-failed = La liaison avec Nestor a échoué ({ $error }). Nouvel essai.
+link-replaced = Cet appareil s'est reconnecté à Nestor ailleurs : cette connexion s'arrête.
+audio-failed = La connexion audio avec Nestor a échoué ({ $error }). Nouvel essai.
+text-not-sent = Pas de liaison avec Nestor : ce message n'est pas parti.
 camera-failed = La caméra ne s'est pas ouverte : cet appareil ne peut pas lire de QR code ({ $error }).
 `;
 
@@ -85,4 +91,7 @@ export type MessageId =
   | "invalid-request"
   | "token-refused"
   | "link-failed"
+  | "link-replaced"
+  | "audio-failed"
+  | "text-not-sent"
   | "camera-failed";

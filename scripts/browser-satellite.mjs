@@ -1,8 +1,9 @@
 // A headless Chromium tab running the browser example as a satellite of `--core <url>`, until
-// SIGTERM. Lets the server's conformance suite check a real browser:
+// SIGTERM: it writes, and talks aloud unless `--no-voice`. Lets the server's conformance suite check
+// a real browser:
 //
 //     uvx --from "nestor-home[voice]==$(cat .nestor-version)" nestor satellites conformance -- \
-//         node scripts/browser-satellite.mjs --core {url}
+//         node scripts/browser-satellite.mjs --core {url} [--no-voice]
 //
 // Chromium's fake microphone (a beep) and fake permission prompt stand in for a person. The
 // enrollment code a scenario configures (`NESTOR_PAIRING_URI`) reaches the page in its address,
@@ -12,9 +13,16 @@ import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
 
-const { values } = parseArgs({ options: { core: { type: "string" }, room: { type: "string", default: "salon" } } });
+const { values } = parseArgs({
+  allowNegative: true,
+  options: {
+    core: { type: "string" },
+    room: { type: "string", default: "salon" },
+    voice: { type: "boolean", default: true },
+  },
+});
 if (!values.core) {
-  console.error("usage: browser-satellite.mjs --core <url> [--room salon]");
+  console.error("usage: browser-satellite.mjs --core <url> [--room salon] [--no-voice]");
   process.exit(2);
 }
 
@@ -36,6 +44,7 @@ const server = await createServer({
 await server.listen();
 const page_url = new URL(server.resolvedUrls?.local[0] ?? "");
 const query = new URLSearchParams({ auto: "", room: values.room, id: "navigateur-test" });
+if (values.voice) query.set("voice", "");
 if (process.env.NESTOR_PAIRING_URI) query.set("pairing_uri", process.env.NESTOR_PAIRING_URI);
 page_url.search = query.toString();
 

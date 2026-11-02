@@ -11,6 +11,12 @@
       @keyframes identify { 50% { background-color: #f5c400; } }
       label { display: block; margin: 0.5rem 0; }
       #code { font-size: 3rem; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; margin: 0; }
+      #chat { list-style: none; padding: 0; }
+      #chat li { margin: 0.4rem 0; padding: 0.4rem 0.6rem; border-radius: 0.5rem; background: #8882; }
+      #chat li.you { margin-left: 4rem; background: #4a90e233; }
+      #chat li.partial { opacity: 0.7; }
+      #say { display: flex; gap: 0.5rem; }
+      #say input { flex: 1; }
       #log { font: 0.85rem ui-monospace, monospace; white-space: pre-wrap; }
     </style>
   </head>
@@ -20,7 +26,8 @@
       <label>Room <input name="room" value="salon" pattern="[a-z0-9][a-z0-9_-]*" required /></label>
       <label>Device id <input name="id" value="navigateur" pattern="[a-z0-9][a-z0-9_-]*" required /></label>
       <label>Enrollment code or pairing URI, if Nestor gave you one <input name="enrollment" /></label>
-      <label><input type="checkbox" name="speak" /> Say the pairing code aloud</label>
+      <label><input type="checkbox" name="voice" /> Talk aloud too (microphone and speaker)</label>
+      <label><input type="checkbox" name="speak" /> Say the pairing code aloud (when talking aloud)</label>
       <label><input type="checkbox" name="qr" /> Scan the pairing QR code with the camera</label>
       <button>Start</button>
     </form>
@@ -28,6 +35,11 @@
     <p id="code" hidden></p>
     <form id="enroll" hidden>
       <label>Or type an enrollment code <input name="code" placeholder="K7QF-2M9X" required /></label>
+      <button>Send</button>
+    </form>
+    <ul id="chat"></ul>
+    <form id="say" hidden>
+      <input name="text" placeholder="Write to Nestor" maxlength="4000" autocomplete="off" required />
       <button>Send</button>
     </form>
     <div id="log"></div>

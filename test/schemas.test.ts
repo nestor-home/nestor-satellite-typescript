@@ -63,10 +63,12 @@ it("knows every message type of the protocol", () => {
   expect(Object.keys(schemas).sort()).toEqual([
     "ack.json",
     "hello.json",
+    "input.text.json",
     "intent.beat.json",
     "intent.behavior.json",
     "intent.expression.json",
     "intent.identify.json",
+    "intent.text.json",
     "manifest.json",
     "observation.person.detected.json",
     "observation.speech.activity.json",
@@ -81,8 +83,12 @@ it("knows every message type of the protocol", () => {
 
 describe("what the SDK sends follows the schema", () => {
   it.each([
-    ["hello", wire.hello(MANIFEST)],
-    ["hello without brand nor sdk", wire.hello(new Manifest({ id: "a", model: "m", room: "r" }, [], { sdk: null }))],
+    ["hello", wire.hello(MANIFEST, "nst1_token")],
+    [
+      "hello without brand nor sdk",
+      wire.hello(new Manifest({ id: "a", model: "m", room: "r" }, [], { sdk: null }), "nst1_token"),
+    ],
+    ["input.text", wire.textInput("Allume la lumière du salon")],
     ["ack", wire.ack("intent-1")],
     ["observation.person.detected", wire.personDetected(2, 0.75)],
     ["observation.speech.activity", wire.speechActivity(true)],
@@ -111,6 +117,8 @@ describe("what the schema allows the core to send, the SDK reads", () => {
     { type: "intent.expression", id: "m-4", at: "2026-10-30T12:00:00Z", payload: { expression: "whisper" } },
     { type: "intent.beat", id: "m-5", at, payload: {} },
     { type: "intent.identify", id: "m-6", at, payload: {} },
+    { type: "intent.text", id: "m-7", at, payload: { text: "Il est midi.", final: true } },
+    { type: "intent.text", id: "m-8", at, payload: { text: "Je regarde." } },
   ])("$type ($id)", (message) => {
     validate(message, `${message.type}.json`);
     expect(wire.parse(message).message?.type).toBe(message.type);

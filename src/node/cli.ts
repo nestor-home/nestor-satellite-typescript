@@ -1,8 +1,10 @@
 /**
- * `nestor-satellite run`: this machine's microphone and speaker as a satellite of a Nestor core.
+ * `nestor-satellite run`: this machine's microphone and speaker, or its terminal, as a satellite of a
+ * Nestor core.
  *
  *     nestor-satellite run --core http://nestor.local:8471 --room salon
  *     NESTOR_PAIRING_URI=nestor+http://nestor.local:8471/?code=K7QF2M9X nestor-satellite run --room salon
+ *     nestor-satellite run --core http://nestor.local:8471 --room bureau --text --no-voice
  *
  * With an enrollment code (`--pairing-uri`, `--pairing-code`, or the same in `NESTOR_PAIRING_URI`,
  * `NESTOR_PAIRING_CODE`), the first run pairs at once; without one, it says a device code to type in
@@ -11,15 +13,17 @@
  */
 
 import { hostname } from "node:os";
+import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
+import type { Voice } from "../audio.js";
 import type { Logger } from "../log.js";
-import { AUDIO_CAPTURE, AUDIO_PLAYBACK, Manifest, ProtocolError } from "../protocol.js";
-import { Satellite } from "../satellite.js";
+import { Manifest, ProtocolError } from "../protocol.js";
+import { CapabilityNotAllowed, Satellite } from "../satellite.js";
 import { SDK_VERSION } from "../version.js";
 import { type AudioSink, type AudioSource, CommandSink, CommandSource, DiscardSink, SilenceSource } from "./audio.js";
 import { type Environment, languagesFromEnv, PAIRING_CODE_ENV, PAIRING_URI_ENV, readProvisioning } from "./env.js";
 import { FileTokenStore } from "./tokens.js";
-import { nodeWebRtc } from "./webrtc.js";
+import { nodeVoice } from "./webrtc.js";
 
 const RATE = 48_000;
 const RAW = `-t raw -b 16 -e signed-integer -c 1 -r ${RATE}`;
@@ -30,7 +34,7 @@ export const DEFAULT_OUTPUT =
 
 const USAGE = `Usage: nestor-satellite run --core <url> --room <room> [options]
 
-Run this machine's microphone and speaker as a Nestor satellite.
+Run this machine's microphone and speaker, or its terminal, as a Nestor satellite.
 
 Options:
   --core <url>          the core's voice server, e.g. http://nestor.local:8471
@@ -48,6 +52,8 @@ Options:
                         (default: ${DEFAULT_INPUT})
   --output <command>    player reading raw 48 kHz s16le mono PCM, or "none" to drop the audio
                         (default: ${DEFAULT_OUTPUT})
+  --text                talk in writing too: each line typed is sent, the answers are printed
+  --no-voice            no microphone nor speaker (with --text: a terminal satellite)
   --ice <url>           a STUN/TURN server, repeatable; only needed beyond the local network
   --locale <tag>        the language it speaks to people in: en, fr (default: $LC_ALL, $LANG…)
   -v, --verbose         say what happens
@@ -64,6 +70,8 @@ export interface Arguments {
   readonly input: string;
   readonly output: string;
   readonly ice: readonly string[];
+  readonly text: boolean;
+  readonly voice: boolean;
   /** The enrollment code a person configured (canonical form), if any. */
   readonly enrollment: string | undefined;
   readonly locale: readonly string[];
@@ -80,6 +88,7 @@ export function parse(argv: readonly string[], env: Environment = process.env): 
   const { values, positionals } = parseArgs({
     args: [...argv],
     allowPositionals: true,
+    allowNegative: true,
     options: {
       core: { type: "string" },
       room: { type: "string" },
@@ -90,6 +99,8 @@ export function parse(argv: readonly string[], env: Environment = process.env): 
       input: { type: "string" },
       output: { type: "string" },
       ice: { type: "string", multiple: true },
+      text: { type: "boolean" },
+      voice: { type: "boolean" },
       "pairing-uri": { type: "string" },
       "pairing-code": { type: "string" },
       locale: { type: "string" },
@@ -124,6 +135,8 @@ export function parse(argv: readonly string[], env: Environment = process.env): 
     input: values.input ?? DEFAULT_INPUT,
     output: values.output ?? DEFAULT_OUTPUT,
     ice: values.ice ?? [],
+    text: values.text ?? false,
+    voice: values.voice ?? true,
     enrollment: provisioning?.enrollment,
     locale: values.locale === undefined ? languagesFromEnv(env) : [values.locale],
     verbose: values.verbose ?? false,
@@ -132,24 +145,44 @@ export function parse(argv: readonly string[], env: Environment = process.env): 
 
 export class UsageError extends Error {}
 
-export function build(args: Arguments, logger: Logger): Satellite {
-  const manifest = new Manifest({ id: args.id, model: args.model, room: args.room, brand: args.brand }, [
-    AUDIO_CAPTURE,
-    AUDIO_PLAYBACK,
-  ]);
-  const source: AudioSource = args.input === "none" ? new SilenceSource(RATE) : new CommandSource(args.input);
-  const sink: AudioSink = args.output === "none" ? new DiscardSink(RATE) : new CommandSink(args.output);
+/** The satellite; with `--text`, `show` prints the assistant's words. */
+export function build(args: Arguments, logger: Logger, show: (text: string) => void = console.log): Satellite {
+  const manifest = new Manifest({ id: args.id, model: args.model, room: args.room, brand: args.brand });
   return new Satellite({
     core: args.core,
     manifest,
     tokens: new FileTokenStore(args.tokenFile),
-    webrtc: nodeWebRtc({ source, sink, logger }),
-    // No screen: the device code is said on the speaker with the bundled voice (unless --output none)
-    // and logged. No camera either, so no enrollment.qr.
+    ...(args.voice ? { voice: voice(args, logger) } : {}),
+    ...(args.text ? { text: { input: true, display: (text: string) => show(text) } } : {}),
+    // The device code is said on the speaker with the bundled voice (unless --output none or
+    // --no-voice) and logged; the terminal is not a screen a person looks at while pairing. No
+    // camera either, so no enrollment.qr.
     pairing: { enrollment: args.enrollment },
     locale: args.locale,
-    iceServers: args.ice,
     logger,
+  });
+}
+
+/** The microphone and speaker: commands that record and play raw PCM, or silence. */
+function voice(args: Arguments, logger: Logger): Voice {
+  const source: AudioSource = args.input === "none" ? new SilenceSource(RATE) : new CommandSource(args.input);
+  const sink: AudioSink = args.output === "none" ? new DiscardSink(RATE) : new CommandSink(args.output);
+  return nodeVoice({ source, sink, iceServers: args.ice, logger });
+}
+
+/** Each line typed in the terminal, sent as typed text; stops with `signal`. */
+function typing(satellite: Satellite, logger: Logger, signal: AbortSignal): void {
+  const lines = createInterface({ input: process.stdin, terminal: false });
+  signal.addEventListener("abort", () => lines.close(), { once: true });
+  lines.on("line", (line) => {
+    const text = line.trim();
+    if (text === "") return;
+    try {
+      if (!satellite.sendText(text)) logger.warn(satellite.messages.format("text-not-sent"));
+    } catch (error) {
+      if (!(error instanceof CapabilityNotAllowed || error instanceof ProtocolError)) throw error;
+      logger.warn(error.message);
+    }
   });
 }
 
@@ -186,6 +219,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   const stop = () => stopping.abort();
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  if (args.text) typing(satellite, logger, stopping.signal);
   try {
     await satellite.run(stopping.signal);
     return 0;
@@ -195,5 +229,6 @@ export async function main(argv: readonly string[]): Promise<number> {
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
+    stopping.abort();
   }
 }

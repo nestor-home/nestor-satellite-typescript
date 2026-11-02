@@ -10,6 +10,7 @@ pnpm install
 pnpm lint && pnpm typecheck && pnpm test   # all three must pass; CI runs them on Node 22 and 24
 pnpm package:check                          # build, publint, attw
 pnpm conformance                            # build, then the published server's suite (needs uvx)
+NESTOR_CONFORMANCE_FROM='../nestor[voice]' pnpm conformance   # the same against a local server
 pnpm format                                 # Biome writes the fixes
 ```
 
@@ -18,36 +19,37 @@ Dependencies are pinned to exact versions (`pnpm add -E`); commit `pnpm-lock.yam
 ## Layout
 
 ```text
-src/              the core: runs anywhere, imports no platform API
+src/              the core: runs anywhere, imports no platform API and no WebRTC
 ├── protocol.ts   values of nestor.satellite/1: Device, Capability, Manifest, pairing methods, Behavior…
 ├── codes.ts      enrollment codes (Crockford base32) and pairing URIs (nestor+http://…/?code=…)
 ├── wire.ts       the JSON envelope and the pairing bodies: what the satellite sends, strict parsing of the core's
-├── dispatch.ts   intents to the Body (identify included), acks, welcome, hang-up
+├── dispatch.ts   intents to the Body and the text display, acks, welcome
 ├── body.ts       Body: what a driver implements to carry out intents
 ├── pairing.ts    Pairing: enrollment code or device code, enroll while pending, refusals (kept hashed), 429 (fetch)
-├── voice.ts      the bundled voice: the sentence as clips, WAV decoding, SpokenCode over the Speaker port
 ├── i18n.ts       Messages: every sentence for people, through Fluent; locales.ts holds en and fr
 ├── tokens.ts     TokenStore (token and refused codes' hashes), MemoryTokenStore, LocalStorageTokenStore
-├── webrtc.ts     the WebRtc / Peer port
-├── w3c.ts        W3cPeer: a Peer over any standard RTCPeerConnection
-├── browser.ts    browserWebRtc: getUserMedia, an <audio> element, webAudioSpeaker (the bundled voice)
-├── satellite.ts  Satellite: pairing, connection, hello/welcome, observations, reconnection, QrScanner port
-├── node/         @nestor-home/satellite/node: @roamhq/wrtc, PCM audio (and sinkSpeaker), FileTokenStore,
-│                 env.ts (NESTOR_PAIRING_URI, NESTOR_PAIRING_CODE, LANG), the CLI
+├── link.ts       the link's WebSocket (the platform's), its URL and close codes
+├── audio.ts      the Voice / Peer port: WebRTC audio, offered once welcomed with audio allowed
+├── satellite.ts  Satellite: pairing, the link (hello/welcome, reconnection), text, observations, audio, QrScanner port
+├── voice/        @nestor-home/satellite/voice: browserVoice (getUserMedia, an <audio> element), W3cPeer over
+│                 any RTCPeerConnection, SpokenCode (the bundled voice), webAudioSpeaker, browserSpeech
+├── node/         @nestor-home/satellite/node: nodeVoice (@roamhq/wrtc), PCM audio (and sinkSpeaker),
+│                 FileTokenStore, env.ts (NESTOR_PAIRING_URI, NESTOR_PAIRING_CODE, LANG), the CLI
 └── qr/           @nestor-home/satellite/qr: cameraQrScanner, browsers only (zxing-wasm, optional peer)
 schemas/          JSON Schemas copied from the server (do not edit by hand)
 voice/            the bundled voice's clips, copied from nestor-satellite-python (do not edit by hand)
 examples/browser/ a tab as a satellite (Vite)
 scripts/          browser-satellite.mjs (a headless Chromium tab as a satellite, for conformance)
-test/             behaviour tests against a fake core (local HTTP, in-process WebRTC)
+test/             behaviour tests against a fake core (local HTTP and WebSocket, in-process WebRTC)
 ```
 
 ## Rules
 
-1. **The main entry point stays platform-free.** Nothing under `src/*.ts` imports `node:*`,
-   `src/node/` or a WebRTC library (`test/independence.test.ts`); its one dependency is
-   `@fluent/bundle`, which runs anywhere. Platform code sits behind the `WebRtc` port.
-   `@roamhq/wrtc` stays an optional peer dependency, loaded by `nodeWebRtc` only.
+1. **The main entry point stays platform-free and needs no WebRTC.** Nothing it loads imports
+   `node:*`, `src/node/`, `src/voice/`, `src/qr/` or a WebRTC library (`test/independence.test.ts`
+   walks its imports); its one dependency is `@fluent/bundle`, which runs anywhere. The link uses the
+   platform's standard `WebSocket`; audio sits behind the `Voice` port. `@roamhq/wrtc` stays an
+   optional peer dependency, loaded by `nodeVoice` only.
 2. **The server owns the protocol.** `schemas/` is a copy of
    the schemas of the `nestor-home` release in `.nestor-version`. To refresh:
    `uvx --from nestor-home=="$(cat .nestor-version)" nestor satellites schemas --out schemas/`, then adapt
@@ -56,17 +58,22 @@ test/             behaviour tests against a fake core (local HTTP, in-process We
 3. **Be lenient in what you read, strict in what you send.** An unknown message type from a newer
    core is ignored; a malformed known one is logged and dropped; what the SDK sends is checked first.
 4. **Conformance is the contract.** `pnpm conformance` runs the server's
-   `nestor satellites conformance` on the built CLI (speaker profile: `--input none --output none --token-file {state}/token.json`) and on the
-   browser example in headless Chromium, once per scenario; the enrollment scenarios set
+   `nestor satellites conformance` on the built CLI (a speaker that writes: `--input none --output none
+   --text --token-file {state}/token.json`) and on the browser example in headless Chromium, aloud and
+   in writing only (`--no-voice`), once per scenario; the enrollment scenarios set
    `NESTOR_PAIRING_URI`, which `scripts/browser-satellite.mjs` passes to the page as `?pairing_uri=`.
-   A change to connection, pairing or audio is done when it passes. The standard it checks:
-   https://nestorhome.dev/docs/satellites/protocol/ (rules N1, P1-P8, I1-I3, W1-W4). See
-   [Conformance](#conformance).
+   A change to the link, pairing, text or audio is done when it passes. The standard it checks:
+   https://nestorhome.dev/docs/satellites/protocol/ (rules N1, P1-P8, I1-I3, L1-L5, T1-T4, A1-A4).
+   See [Conformance](#conformance).
 5. **The network loop never waits for the device.** `Body` methods return at once; a failing body is
    logged, never allowed to break the link. Physical safety lives in the driver.
-6. **Capabilities are honest.** A declared capability whose device cannot open fails clearly at
-   `run`; observations need their capability declared and allowed. `enrollment.qr` needs a
-   `scanner` that really decodes camera frames: Node has none, so it never declares it.
+6. **Capabilities are honest.** `text.*` and `audio.*` follow from what the driver provides (a
+   `text.display` callback, `text.input`, a `voice` with a microphone or a speaker); declaring one
+   without it throws. Typed text and observations need their capability declared and allowed. The
+   microphone opens only for an audio connection, once welcomed with audio allowed: pairing and the
+   link never wait for it, and a voice that fails is offered again while the link is up.
+   `enrollment.qr` needs a `scanner` that really decodes camera frames: Node has none, so it never
+   declares it.
 7. **Secrets:** the token file is mode 600; a refused token is forgotten. No secret in the repo.
 8. **Pairing never fails silently.** The device code always reaches the log (at warning level, so the
    default logger shows it); a refused enrollment code is said, translated, and never sent again,
@@ -93,12 +100,13 @@ which checks the exit status (0), that no line starts with `FAIL`, and a few nam
 ```bash
 pnpm build
 uvx --from "nestor-home[voice]==$(cat .nestor-version)" nestor satellites conformance --deadline 20 -- \
-  node dist/node/bin.js run --core {url} --room salon --input none --output none --token-file {state}/token.json
+  node dist/node/bin.js run --core '{url}' --room salon --input none --output none --text --token-file '{state}/token.json'
 uvx --from "nestor-home[voice]==$(cat .nestor-version)" nestor satellites conformance --deadline 20 -- \
-  node scripts/browser-satellite.mjs --core {url}
+  node scripts/browser-satellite.mjs --core '{url}' [--no-voice]
 ```
 
-Against a local checkout of the server, replace the `--from` argument by `'../nestor[voice]'`.
+Against a local checkout of the server, replace the `--from` argument by `'../nestor[voice]'` (or set
+`NESTOR_CONFORMANCE_FROM` for `pnpm conformance`).
 
 ## Code conventions
 
@@ -111,6 +119,6 @@ Against a local checkout of the server, replace the `--from` argument by `'../ne
 ## Tests
 
 - Test behaviour, not implementation: one behaviour per test, named as a sentence.
-- Hardware and network are replaced by doubles (`FakeCore`, `FakeWebRtc`, a scripted wrtc); one
-  test runs the real `@roamhq/wrtc` in loopback.
+- Hardware and network are replaced by doubles (`FakeCore` over real HTTP and WebSocket,
+  `FakeVoice`, a scripted wrtc); one test runs the real `@roamhq/wrtc` in loopback.
 - Cover the happy path, an unavailable core, a cancellation and a missing optional capability.
