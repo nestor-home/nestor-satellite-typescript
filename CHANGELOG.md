@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.3.0...v0.4.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* talk over one WebSocket link, with voice as a subpath ([#18](https://github.com/nestor-home/nestor-satellite-typescript/issues/18))
+
+### Features
+
+* talk over one WebSocket link, with voice as a subpath ([#18](https://github.com/nestor-home/nestor-satellite-typescript/issues/18)) ([8935751](https://github.com/nestor-home/nestor-satellite-typescript/commit/89357513965d9fc4a25cd545b43b7f82a451d76d))
+
 ## [0.3.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.2.0...v0.3.0) (2026-11-01)
 
 
