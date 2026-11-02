@@ -95,8 +95,21 @@ export class FakeWebRtc implements WebRtc, Answerer<CoreSession> {
   constructor(readonly speaker?: Speaker) {}
 
   async open(needs: MediaNeeds): Promise<void> {
+    await this.held;
     this.opened = needs;
   }
+
+  /** `open` waits until the test resolves (a person allows the microphone) or rejects it. */
+  holdOpen(): { resolve: () => void; reject: (error: Error) => void } {
+    let release = { resolve: () => {}, reject: (_: Error) => {} };
+    this.held = new Promise<void>((resolve, reject) => {
+      release = { resolve, reject };
+    });
+    this.held.catch(() => {}); // rejected before `open` awaits it
+    return release;
+  }
+
+  private held: Promise<void> = Promise.resolve();
 
   async close(): Promise<void> {
     this.closed += 1;

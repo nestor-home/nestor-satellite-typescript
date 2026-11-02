@@ -49,7 +49,7 @@ interface Start {
 
 function start({ room, id, enrollment, speak, qr }: Start): void {
   form.hidden = true;
-  status.textContent = "Connecting…";
+  status.textContent = "Connecting… Allow the microphone if the browser asks.";
   const locale = params.get("lang") ?? navigator.languages;
   const satellite = new Satellite({
     core: params.get("core") ?? location.origin,

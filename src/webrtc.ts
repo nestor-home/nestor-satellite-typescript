@@ -54,7 +54,7 @@ export interface WebRtc {
    * bundled voice); `undefined` when the device has none. Heard once `open` opened the playback.
    */
   readonly speaker?: Speaker | undefined;
-  /** Open the audio devices, once per `Satellite.run`. */
+  /** Open the audio devices, once per `Satellite.run`, while the satellite pairs (a browser may wait for a person to allow the microphone). */
   open?(needs: MediaNeeds): Promise<void>;
   createPeer(options: PeerOptions): Peer | Promise<Peer>;
   /** Release the audio devices. */

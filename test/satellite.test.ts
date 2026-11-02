@@ -227,6 +227,31 @@ describe("a satellite", () => {
     await expect(satellite.run()).rejects.toThrow(/microphone/);
   });
 
+  it("shows its device code while a person is asked for the microphone, and connects once it opens", async () => {
+    const webrtc = new FakeWebRtc();
+    const allowed = webrtc.holdOpen();
+    const core = await FakeCore.start({ webrtc, pendingPolls: 2 });
+    const run = await start([AUDIO_CAPTURE], {}, core);
+    await until(() => run.codes.length === 1);
+    await until(() => run.satellite.pending === false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(core.offers).toHaveLength(0);
+    allowed.resolve();
+    await greet(await core.sessions.next(), [AUDIO_CAPTURE]);
+    expect(webrtc.opened).toEqual({ capture: true, playback: false });
+  });
+
+  it("stops pairing when the microphone is refused while the device code shows", async () => {
+    const webrtc = new FakeWebRtc();
+    const allowed = webrtc.holdOpen();
+    const core = await FakeCore.start({ webrtc, pendingPolls: 1_000_000 });
+    const run = await start([AUDIO_CAPTURE], {}, core);
+    await until(() => run.codes.length === 1);
+    allowed.reject(new Error("audio.capture is declared but the microphone did not open: NotAllowedError"));
+    await expect(run.done).rejects.toThrow(/NotAllowedError/);
+    expect(webrtc.closed).toBe(1);
+  });
+
   it("cannot run twice at once", async () => {
     const { satellite } = await start([AUDIO_CAPTURE]);
     await expect(satellite.run()).rejects.toThrow(/already running/);
@@ -467,6 +492,19 @@ describe("the device code said aloud", () => {
     const said = speaker.samples;
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(speaker.samples).toBe(said);
+  });
+
+  it("is said once the playback is open, not before", async () => {
+    const speaker = new RecordingSpeaker();
+    const webrtc = new FakeWebRtc(speaker);
+    const allowed = webrtc.holdOpen();
+    const core = await FakeCore.start({ webrtc, pendingPolls: Number.POSITIVE_INFINITY });
+    const run = await start([AUDIO_PLAYBACK], { webrtc, pairing: { pollMs: 5 } }, core);
+    await until(() => run.satellite.pending);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(speaker.samples).toBe(0);
+    allowed.resolve();
+    await until(() => speaker.samples > 0);
   });
 
   it("is not declared without a speaker, nor without audio.playback", () => {

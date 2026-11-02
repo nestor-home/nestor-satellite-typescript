@@ -42,7 +42,7 @@ import {
   SPEECH_ACTIVITY,
 } from "./protocol.js";
 import type { TokenStore } from "./tokens.js";
-import { SpokenCode } from "./voice.js";
+import { type Speaker, SpokenCode } from "./voice.js";
 import type { Peer, SessionDescription, WebRtc } from "./webrtc.js";
 import { hello, personDetected, type SatelliteMessage, speechActivity, type Welcome } from "./wire.js";
 
@@ -142,6 +142,8 @@ export class Satellite {
   private peer: Peer | null = null;
   private running = false;
   private paired = false;
+  /** Whether the audio devices opened for this run (settles once they did or failed). */
+  private devices: Promise<boolean> = Promise.resolve(true);
 
   constructor(options: SatelliteOptions) {
     this.options = options;
@@ -183,9 +185,18 @@ export class Satellite {
       throw new ProtocolError(`pairing.voice needs ${AUDIO_PLAYBACK} declared and a speaker`);
     }
     const wanted = setup.speak === undefined && (setup.voice ?? setup.display === undefined);
-    return wanted && speaker !== undefined
-      ? new SpokenCode(speaker, this.messages, { logger: this.logger })
-      : undefined;
+    if (!wanted || speaker === undefined) return undefined;
+    // The code is said once the playback is open: the speaker hears nothing before.
+    const opened: Speaker = {
+      sampleRate: speaker.sampleRate,
+      load: async (path) => {
+        if (!(await this.devices)) throw new Error("the audio devices did not open");
+        return speaker.load(path);
+      },
+      write: (pcm) => speaker.write(pcm),
+      ...(speaker.flush === undefined ? {} : { flush: () => speaker.flush?.() }),
+    };
+    return new SpokenCode(opened, this.messages, { logger: this.logger });
   }
 
   /** Whether the satellite waits for a person to pair it (its device code was presented). */
@@ -224,15 +235,39 @@ export class Satellite {
     if (this.running) throw new Error("this satellite is already running");
     this.running = true;
     const { webrtc, backoffMs = [500, 30_000] } = this.options;
+    // The devices open while the satellite pairs: a person may have to allow the microphone, and the
+    // device code must show meanwhile. A device that cannot open stops the run, even mid-pairing.
+    const stop = new AbortController();
+    const forward = () => stop.abort();
+    signal?.addEventListener("abort", forward, { once: true });
+    if (signal?.aborted) stop.abort();
+    let failed: { error: unknown } | null = null;
+    let settled = false;
+    this.devices = Promise.resolve()
+      .then(() =>
+        webrtc.open?.({ capture: this.manifest.has(AUDIO_CAPTURE), playback: this.manifest.has(AUDIO_PLAYBACK) }),
+      )
+      .then(
+        () => true,
+        (error: unknown) => {
+          failed = { error };
+          stop.abort();
+          return false;
+        },
+      )
+      .finally(() => {
+        settled = true;
+      });
     try {
-      await webrtc.open?.({ capture: this.manifest.has(AUDIO_CAPTURE), playback: this.manifest.has(AUDIO_PLAYBACK) });
       let delay = backoffMs[0];
-      while (!signal?.aborted) {
+      while (!stop.signal.aborted) {
         let welcomed = false;
         try {
-          welcomed = await this.connectOnce(await this.token(signal), signal);
+          const token = await this.token(stop.signal);
+          if (!(await this.devices)) break;
+          welcomed = await this.connectOnce(token, stop.signal);
         } catch (error) {
-          if (signal?.aborted) break;
+          if (stop.signal.aborted) break;
           if (error instanceof PairingError) throw error;
           if (error instanceof Refused) {
             this.logger.warn(this.messages.format("token-refused"));
@@ -244,14 +279,21 @@ export class Satellite {
         }
         delay = welcomed ? backoffMs[0] : Math.min(delay * 2, backoffMs[1]);
         try {
-          await sleep(delay, signal);
+          await sleep(delay, stop.signal);
         } catch {
           break;
         }
       }
+      if (failed !== null) throw (failed as { error: unknown }).error;
     } finally {
+      signal?.removeEventListener("abort", forward);
       this.running = false;
       await webrtc.close?.();
+      // Stopped while a person was still asked for the microphone: release it once it opens.
+      if (!settled)
+        void this.devices.then(async (opened) => {
+          if (opened) await webrtc.close?.();
+        });
     }
   }
 
