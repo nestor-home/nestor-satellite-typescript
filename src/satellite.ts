@@ -23,7 +23,7 @@
  */
 
 import type { MediaNeeds, Peer, SessionDescription, Voice } from "./audio.js";
-import type { Body } from "./body.js";
+import { type Body, callBody } from "./body.js";
 import { readEnrollment } from "./codes.js";
 import { Dispatcher, type TextDisplay } from "./dispatch.js";
 import { Messages } from "./i18n.js";
@@ -55,7 +55,15 @@ import {
   TEXT_INPUT,
 } from "./protocol.js";
 import type { TokenStore } from "./tokens.js";
-import { hello, personDetected, type SatelliteMessage, speechActivity, textInput, type Welcome } from "./wire.js";
+import {
+  hello,
+  parseAudioAnswer,
+  personDetected,
+  type SatelliteMessage,
+  speechActivity,
+  textInput,
+  type Welcome,
+} from "./wire.js";
 
 /** An observation the device did not declare, or the household did not allow. */
 export class CapabilityNotAllowed extends ProtocolError {
@@ -438,9 +446,10 @@ export class Satellite {
       this.sender = send;
       this.logger.info(`welcomed in ${this.welcome?.room ?? "?"}`);
       this.call(() => this.body.connected?.(true));
-      const needs = this.audioNeeds();
-      if (needs !== null) {
-        audioDone = this.audio(token, needs, audio.signal, () => {
+      const { voice } = this.options;
+      const needs = voice === undefined ? null : this.audioNeeds(voice);
+      if (voice !== undefined && needs !== null) {
+        audioDone = this.audio(voice, token, needs, audio.signal, () => {
           end(LINK_CLOSE.tokenRefused, "the audio offer's token was refused");
         });
       }
@@ -466,10 +475,9 @@ export class Satellite {
   }
 
   /** What the voice opens, from what the welcome allowed; `null` for no audio at all (A1). */
-  private audioNeeds(): MediaNeeds | null {
-    const { voice } = this.options;
+  private audioNeeds(voice: Voice): MediaNeeds | null {
     const allowed = this.welcome?.capabilities;
-    if (voice === undefined || allowed === undefined) return null;
+    if (allowed === undefined) return null;
     const needs = {
       capture: voice.capture && allowed.has(AUDIO_CAPTURE),
       playback: voice.playback && allowed.has(AUDIO_PLAYBACK),
@@ -478,8 +486,13 @@ export class Satellite {
   }
 
   /** Audio while the link is up: offered, and offered again with a growing delay when it fails (A3). */
-  private async audio(token: string, needs: MediaNeeds, stop: AbortSignal, refused: () => void): Promise<void> {
-    const voice = this.options.voice as Voice;
+  private async audio(
+    voice: Voice,
+    token: string,
+    needs: MediaNeeds,
+    stop: AbortSignal,
+    refused: () => void,
+  ): Promise<void> {
     const [first, longest] = this.backoff;
     let delay = first;
     while (!stop.aborted) {
@@ -494,7 +507,8 @@ export class Satellite {
         await voice.open(needs);
         stop.throwIfAborted();
         peer = await voice.createPeer({
-          events: { onClosed: (reason) => finish(reason), onAudio: () => this.call(() => this.body.heartbeat?.()) },
+          onClosed: (reason) => finish(reason),
+          onAudio: () => this.call(() => this.body.heartbeat?.()),
         });
         await peer.accept(await this.offerAudio(await peer.offer(), token, stop));
         this.audioConnections += 1;
@@ -532,26 +546,10 @@ export class Satellite {
     });
     if (response.status === 401) throw new Refused("token refused");
     if (!response.ok) throw new HttpError(response.status, `audio offer: HTTP ${response.status}`);
-    const answer: unknown = await response.json();
-    if (
-      typeof answer !== "object" ||
-      answer === null ||
-      !("sdp" in answer) ||
-      typeof answer.sdp !== "string" ||
-      !("type" in answer) ||
-      answer.type !== "answer"
-    ) {
-      throw new HttpError(502, "audio offer: the core did not answer with an SDP answer");
-    }
-    return { sdp: answer.sdp, type: "answer" };
+    return parseAudioAnswer(await response.json());
   }
 
-  /** A failing body is the driver's bug: it is logged, never allowed to break the link. */
   private call(action: () => void): void {
-    try {
-      action();
-    } catch (error) {
-      this.logger.warn(`the body failed: ${describe(error)}`);
-    }
+    callBody(this.logger, action);
   }
 }

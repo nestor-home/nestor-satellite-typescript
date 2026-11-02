@@ -7,14 +7,14 @@
  * (the source) opens only for one; the speaker (the sink) also says the device code while pairing.
  */
 
-import type { MediaNeeds, Peer, PeerOptions, Voice } from "../audio.js";
+import type { MediaNeeds, Peer, PeerEvents, Voice } from "../audio.js";
 import type { Messages } from "../i18n.js";
 import { describe, type Logger, quietLogger } from "../log.js";
 import type { CodeVoice } from "../pairing.js";
 import { resample, SpokenCode } from "../voice/spoken.js";
 import { type AudioBridge, W3cPeer, type W3cPeerConnectionConstructor, type W3cTrack } from "../voice/w3c.js";
 import { type AudioSink, type AudioSource, DiscardSink, SilenceSource } from "./audio.js";
-import { voiceFile } from "./voice.js";
+import { sinkSpeaker } from "./voice.js";
 
 /** 10 ms of audio, what `RTCAudioSource.onData` takes. */
 export interface RTCAudioData {
@@ -89,15 +89,12 @@ class NodeVoice implements Voice, AudioBridge {
     const { sink } = this.options;
     if (sink === undefined || sink instanceof DiscardSink) return undefined;
     // The clips load before anything is written: the player starts while they do.
-    const speaker = {
-      sampleRate: sink.sampleRate,
-      load: async (path: string) => {
-        await this.startSink();
-        return voiceFile(path);
-      },
-      write: (pcm: Int16Array) => sink.write(pcm),
+    const speaker = sinkSpeaker(sink);
+    const load = async (path: string) => {
+      await this.startSink();
+      return speaker.load(path);
     };
-    return new SpokenCode(speaker, messages, { logger });
+    return new SpokenCode({ ...speaker, load }, messages, { logger });
   }
 
   async open(needs: MediaNeeds): Promise<void> {
@@ -122,14 +119,9 @@ class NodeVoice implements Voice, AudioBridge {
     });
   }
 
-  createPeer(options: PeerOptions): Peer {
+  createPeer(events: PeerEvents): Peer {
     if (this.wrtc === null) throw new Error("open the voice before creating a peer");
-    return new W3cPeer(
-      this.wrtc.RTCPeerConnection,
-      this,
-      { ...options, iceServers: this.options.iceServers ?? [] },
-      this.logger,
-    );
+    return new W3cPeer(this.wrtc.RTCPeerConnection, this, events, this.options.iceServers ?? [], this.logger);
   }
 
   async close(): Promise<void> {

@@ -8,7 +8,7 @@
  * start the satellite from a click.
  */
 
-import type { MediaNeeds, Peer, PeerOptions, Voice } from "../audio.js";
+import type { MediaNeeds, Peer, PeerEvents, Voice } from "../audio.js";
 import type { Messages } from "../i18n.js";
 import { describe, type Logger, quietLogger } from "../log.js";
 import type { CodeVoice } from "../pairing.js";
@@ -57,6 +57,8 @@ class BrowserVoice implements Voice, AudioBridge {
   readonly playback: boolean;
   private readonly speaker: Speaker | undefined;
   private readonly logger: Logger;
+  /** The browser's `RTCPeerConnection`, found by `open`. */
+  private connection: W3cPeerConnectionConstructor | null = null;
   private microphone: W3cTrack | null = null;
   private element: AudioElementLike | null = null;
   private playing = false;
@@ -75,6 +77,7 @@ class BrowserVoice implements Voice, AudioBridge {
   async open(needs: MediaNeeds): Promise<void> {
     const media = globals();
     if (media.RTCPeerConnection === undefined) throw new Error("this browser has no WebRTC (RTCPeerConnection)");
+    this.connection = media.RTCPeerConnection;
     this.playing = needs.playback && this.playback;
     if (this.playing) this.element = this.options.element ?? (media.Audio ? new media.Audio() : null);
     if (!needs.capture || this.options.microphone === false) return;
@@ -91,10 +94,9 @@ class BrowserVoice implements Voice, AudioBridge {
     if (this.microphone === null) throw new Error("the microphone gave no audio track");
   }
 
-  createPeer(options: PeerOptions): Peer {
-    const Connection = globals().RTCPeerConnection;
-    if (Connection === undefined) throw new Error("this browser has no WebRTC (RTCPeerConnection)");
-    return new W3cPeer(Connection, this, { ...options, iceServers: this.options.iceServers ?? [] }, this.logger);
+  createPeer(events: PeerEvents): Peer {
+    if (this.connection === null) throw new Error("open the voice before creating a peer");
+    return new W3cPeer(this.connection, this, events, this.options.iceServers ?? [], this.logger);
   }
 
   async close(): Promise<void> {

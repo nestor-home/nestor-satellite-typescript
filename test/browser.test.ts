@@ -96,7 +96,7 @@ describe("in a browser", () => {
     const voice = browserVoice({ element, iceServers: ["stun:stun.example:3478"] });
     expect([voice.capture, voice.playback]).toEqual([true, true]);
     await voice.open({ capture: true, playback: true });
-    const peer = await voice.createPeer({ events: events() });
+    const peer = await voice.createPeer(events());
     const pc = Connection.last as Connection;
     expect(pc.configuration).toEqual({ iceServers: [{ urls: "stun:stun.example:3478" }] });
     expect(pc.tracks).toEqual([microphone]);
@@ -118,7 +118,7 @@ describe("in a browser", () => {
     const voice = browserVoice();
     await voice.open({ capture: false, playback: false });
     const seen = events();
-    const peer = await voice.createPeer({ events: seen });
+    const peer = await voice.createPeer(seen);
     const pc = Connection.last as Connection;
     pc.connectionState = "failed";
     pc.onconnectionstatechange?.({});
@@ -133,7 +133,7 @@ describe("in a browser", () => {
     browser({ getUserMedia });
     const voice = browserVoice();
     await voice.open({ capture: false, playback: true });
-    await voice.createPeer({ events: events() });
+    await voice.createPeer(events());
     expect(getUserMedia).not.toHaveBeenCalled();
     expect((Connection.last as Connection).transceivers).toEqual(["audio"]);
   });
@@ -143,7 +143,7 @@ describe("in a browser", () => {
     const voice = browserVoice({ element });
     await voice.open({ capture: true, playback: true });
     const seen = events();
-    const peer = await voice.createPeer({ events: seen });
+    const peer = await voice.createPeer(seen);
     const stream = { id: "remote" };
     (Connection.last as Connection).ontrack?.({ track: new Track(), streams: [stream] });
     expect(element.srcObject).toBe(stream);

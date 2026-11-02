@@ -143,7 +143,7 @@ describe("over the real @roamhq/wrtc", () => {
     await webrtc.open({ capture: true, playback: true });
     const log: string[] = [];
     const events: PeerEvents = { onClosed: (reason) => log.push(`closed: ${reason}`), onAudio: () => {} };
-    const peer = await webrtc.createPeer({ events });
+    const peer = await webrtc.createPeer(events);
 
     // The core: answers the offer, sends a tone, listens.
     const core = new wrtc.RTCPeerConnection({ iceServers: [] }) as W3cPeerConnection & {

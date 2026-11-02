@@ -15,6 +15,7 @@
 import { hostname } from "node:os";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
+import type { Voice } from "../audio.js";
 import type { Logger } from "../log.js";
 import { Manifest, ProtocolError } from "../protocol.js";
 import { CapabilityNotAllowed, Satellite } from "../satellite.js";
@@ -147,13 +148,11 @@ export class UsageError extends Error {}
 /** The satellite; with `--text`, `show` prints the assistant's words. */
 export function build(args: Arguments, logger: Logger, show: (text: string) => void = console.log): Satellite {
   const manifest = new Manifest({ id: args.id, model: args.model, room: args.room, brand: args.brand });
-  const source: AudioSource = args.input === "none" ? new SilenceSource(RATE) : new CommandSource(args.input);
-  const sink: AudioSink = args.output === "none" ? new DiscardSink(RATE) : new CommandSink(args.output);
   return new Satellite({
     core: args.core,
     manifest,
     tokens: new FileTokenStore(args.tokenFile),
-    ...(args.voice ? { voice: nodeVoice({ source, sink, iceServers: args.ice, logger }) } : {}),
+    ...(args.voice ? { voice: voice(args, logger) } : {}),
     ...(args.text ? { text: { input: true, display: (text: string) => show(text) } } : {}),
     // The device code is said on the speaker with the bundled voice (unless --output none or
     // --no-voice) and logged; the terminal is not a screen a person looks at while pairing. No
@@ -162,6 +161,13 @@ export function build(args: Arguments, logger: Logger, show: (text: string) => v
     locale: args.locale,
     logger,
   });
+}
+
+/** The microphone and speaker: commands that record and play raw PCM, or silence. */
+function voice(args: Arguments, logger: Logger): Voice {
+  const source: AudioSource = args.input === "none" ? new SilenceSource(RATE) : new CommandSource(args.input);
+  const sink: AudioSink = args.output === "none" ? new DiscardSink(RATE) : new CommandSink(args.output);
+  return nodeVoice({ source, sink, iceServers: args.ice, logger });
 }
 
 /** Each line typed in the terminal, sent as typed text; stops with `signal`. */

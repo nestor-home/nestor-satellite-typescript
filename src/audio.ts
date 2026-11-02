@@ -35,10 +35,6 @@ export interface PeerEvents {
   onAudio(): void;
 }
 
-export interface PeerOptions {
-  readonly events: PeerEvents;
-}
-
 export interface Peer {
   /** Create the offer, with its ICE candidates gathered (no trickle). */
   offer(): Promise<SessionDescription>;
@@ -58,7 +54,8 @@ export interface Voice {
   codeVoice?(messages: Messages, logger: Logger): CodeVoice | undefined;
   /** Open the audio devices for one connection (the microphone only when `capture` is allowed). */
   open(needs: MediaNeeds): Promise<void>;
-  createPeer(options: PeerOptions): Peer | Promise<Peer>;
+  /** One audio connection, on the devices `open` opened; `events` say how it goes. */
+  createPeer(events: PeerEvents): Peer | Promise<Peer>;
   /** Release the audio devices; called after each connection, and when the satellite stops. */
   close(): Promise<void>;
 }

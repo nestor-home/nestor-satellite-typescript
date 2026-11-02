@@ -121,7 +121,7 @@ async function start({ room, id, enrollment, voice, speak, qr }: Start): Promise
         bubble(text, "you");
         field.value = "";
       } else {
-        log("not connected: the message was not sent");
+        log(satellite.messages.format("text-not-sent"));
       }
     } catch (error) {
       log(error instanceof Error ? error.message : String(error)); // typed text not allowed by the household

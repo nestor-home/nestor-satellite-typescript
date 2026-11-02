@@ -9,7 +9,7 @@
  * `@nestor-home/satellite/node`.
  */
 
-export type { MediaNeeds, Peer, PeerEvents, PeerOptions, SessionDescription, Voice } from "./audio.js";
+export type { MediaNeeds, Peer, PeerEvents, SessionDescription, Voice } from "./audio.js";
 export type { Body } from "./body.js";
 export {
   DEVICE_CODE,

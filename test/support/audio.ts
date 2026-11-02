@@ -1,15 +1,6 @@
 /** An in-process voice whose audio connections the fake core answers: each answer is an `AudioSession`. */
 
-import type {
-  Logger,
-  MediaNeeds,
-  Messages,
-  Peer,
-  PeerEvents,
-  PeerOptions,
-  SessionDescription,
-  Voice,
-} from "../../src/index.js";
+import type { Logger, MediaNeeds, Messages, Peer, PeerEvents, SessionDescription, Voice } from "../../src/index.js";
 import { type Speaker, SpokenCode } from "../../src/voice/index.js";
 import type { Answerer } from "./core.js";
 
@@ -93,8 +84,8 @@ export class FakeVoice implements Voice, Answerer<AudioSession> {
     this.closed += 1;
   }
 
-  createPeer(options: PeerOptions): Peer {
-    const peer = new FakePeer(options.events);
+  createPeer(events: PeerEvents): Peer {
+    const peer = new FakePeer(events);
     this.peers.push(peer);
     return peer;
   }

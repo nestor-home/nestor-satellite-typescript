@@ -9,7 +9,7 @@
  * returned as `null`, so it never breaks an older driver.
  *
  * Bodies of the pairing endpoints (`pairing.*` schemas): requests and proofs the satellite sends,
- * tickets, states and errors it reads.
+ * tickets, states and errors it reads. And the core's answer to an audio offer.
  */
 
 import {
@@ -204,6 +204,15 @@ function read(type: string, payload: Record<string, unknown>): CoreMessage | nul
     default:
       return null;
   }
+}
+
+/** The core's answer to an audio offer (`POST /satellites/{device_id}/audio`); other fields are ignored. */
+export function parseAudioAnswer(data: unknown): { readonly sdp: string; readonly type: "answer" } {
+  const body = record(data, "audio answer");
+  if (typeof body.sdp !== "string" || body.type !== "answer") {
+    throw new ProtocolError("audio answer: the core did not answer with an SDP answer");
+  }
+  return { sdp: body.sdp, type: "answer" };
 }
 
 // Pairing bodies.

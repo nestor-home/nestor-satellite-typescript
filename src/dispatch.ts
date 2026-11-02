@@ -4,7 +4,7 @@
  * reports itself up to the body once it is welcomed.
  */
 
-import type { Body } from "./body.js";
+import { type Body, callBody } from "./body.js";
 import { describe, type Logger, quietLogger } from "./log.js";
 import { type AckMessage, ack, parse, type Welcome } from "./wire.js";
 
@@ -59,12 +59,7 @@ export class Dispatcher {
     return "nothing";
   }
 
-  /** A failing body is the driver's bug: it is logged, never allowed to break the link. */
   private call(action: () => void): void {
-    try {
-      action();
-    } catch (error) {
-      this.logger.warn(`the body failed: ${describe(error)}`);
-    }
+    callBody(this.logger, action);
   }
 }

@@ -6,7 +6,7 @@
  * the DOM typings nor a Node library's leak into the SDK's public types.
  */
 
-import type { Peer, PeerEvents, PeerOptions, SessionDescription } from "../audio.js";
+import type { Peer, PeerEvents, SessionDescription } from "../audio.js";
 import { describe, type Logger } from "../log.js";
 
 export interface W3cTrack {
@@ -52,18 +52,19 @@ export class W3cPeer implements Peer {
   constructor(
     Connection: W3cPeerConnectionConstructor,
     audio: AudioBridge,
-    options: PeerOptions & { readonly iceServers: readonly string[] },
+    events: PeerEvents,
+    /** STUN/TURN URLs, only needed beyond the local network. */
+    iceServers: readonly string[],
     private readonly logger: Logger,
     private readonly gatherTimeoutMs = 3000,
   ) {
-    this.pc = new Connection({ iceServers: options.iceServers.map((urls) => ({ urls })) });
-    const events: PeerEvents = options.events;
+    this.pc = new Connection({ iceServers: iceServers.map((urls) => ({ urls })) });
     const track = audio.outgoing();
     if (track === null) this.pc.addTransceiver("audio", { direction: "sendrecv" });
     else this.pc.addTrack(track);
     this.pc.onconnectionstatechange = () => {
       const state = this.pc.connectionState;
-      if (state === "failed" || state === "closed") this.end(events, `the connection ${state}`);
+      if ((state === "failed" || state === "closed") && !this.closed) events.onClosed(`the connection ${state}`);
     };
     this.pc.ontrack = (event) => {
       if (event.track.kind !== "audio") return;
@@ -100,10 +101,6 @@ export class W3cPeer implements Peer {
     }
     this.pc.onconnectionstatechange = this.pc.ontrack = this.pc.onicegatheringstatechange = null;
     this.pc.close();
-  }
-
-  private end(events: PeerEvents, reason: string): void {
-    if (!this.closed) events.onClosed(reason);
   }
 
   /** The offer carries every ICE candidate found: one request, no trickling. */

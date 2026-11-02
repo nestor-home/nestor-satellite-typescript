@@ -6,6 +6,7 @@
  * Physical safety (limits, watchdogs) belongs to the driver and never depends on the link.
  */
 
+import { describe, type Logger } from "./log.js";
 import type { Behavior, Expression } from "./protocol.js";
 
 export interface Body {
@@ -25,4 +26,13 @@ export interface Body {
   heartbeat?(): void;
   /** The link to the core came up (welcomed) or went down. */
   connected?(up: boolean): void;
+}
+
+/** Call the body: a failing body is the driver's bug, logged and never allowed to break the link. */
+export function callBody(logger: Logger, action: () => void): void {
+  try {
+    action();
+  } catch (error) {
+    logger.warn(`the body failed: ${describe(error)}`);
+  }
 }
