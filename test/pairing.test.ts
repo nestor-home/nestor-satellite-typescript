@@ -14,9 +14,9 @@ import {
   Pairing,
   PairingError,
   type PairingOptions,
-  SpokenCode,
 } from "../src/index.js";
 import { FileTokenStore } from "../src/node/tokens.js";
+import { SpokenCode } from "../src/voice/index.js";
 import { FakeCore, until } from "./support/core.js";
 import { RecordingSpeaker } from "./support/voice.js";
 

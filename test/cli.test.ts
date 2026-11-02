@@ -75,6 +75,16 @@ describe("nestor-satellite run", () => {
     );
   });
 
+  it("writes in the terminal with --text, and talks with no voice at all with --no-voice", () => {
+    const argv = ["run", "--core", "http://c", "--room", "bureau"];
+    expect(parse(argv, NO_ENV)).toMatchObject({ text: false, voice: true });
+    const terminal = build(parse([...argv, "--text", "--no-voice"], NO_ENV) as never, quiet);
+    expect([...terminal.manifest.names]).toEqual(["text.input", "text.display"]);
+    expect(terminal.manifest.pairingMethods).toEqual(["enrollment.provisioning"]); // its code is in the log
+    const both = build(parse([...argv, "--text"], NO_ENV) as never, quiet);
+    expect([...both.manifest.names]).toEqual(["text.input", "text.display", "audio.capture", "audio.playback"]);
+  });
+
   it("answers help and version, and exits 2 on misuse", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

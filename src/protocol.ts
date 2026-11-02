@@ -17,6 +17,10 @@ export const HEAD_MOTION = "motion.head";
 export const IDENTIFY = "device.identify";
 export const PERSON_DETECTION = "vision.person_detection";
 export const SPEECH_ACTIVITY = "audio.speech_activity";
+/** The device sends what a person typed (`input.text`). */
+export const TEXT_INPUT = "text.input";
+/** The device shows the assistant's words (`intent.text`). */
+export const TEXT_DISPLAY = "text.display";
 
 export const MAX_CAPABILITIES = 32;
 const MAX_SDK = 64;

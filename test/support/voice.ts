@@ -1,7 +1,7 @@
 /** A speaker that keeps what it is given, with the package's own clips, and a clock tests drive. */
 
-import type { Clock, Speaker } from "../../src/index.js";
 import { voiceFile } from "../../src/node/voice.js";
+import type { Clock, Speaker } from "../../src/voice/index.js";
 
 export class RecordingSpeaker implements Speaker {
   readonly written: Int16Array[] = [];

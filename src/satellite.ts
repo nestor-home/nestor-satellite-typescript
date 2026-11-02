@@ -1,26 +1,36 @@
 /**
- * A satellite's life: pair once, then stay connected to the core, reconnecting when the link drops.
+ * A satellite's life: pair once, then hold its link to the core, reconnecting when it drops.
  *
- *     const satellite = new Satellite({ core: "http://nestor.local:8471", manifest, tokens, webrtc, body });
+ *     const satellite = new Satellite({ core: "http://nestor.local:8471", manifest, tokens, text, voice, body });
  *     await satellite.run(signal); // until the signal aborts
  *
  * Pairing (`./pairing.ts`) uses the enrollment code it was configured with, else presents its device
- * code on the outputs it was given (`pairing.display`, `pairing.speak`) and in its log. A device with a
- * speaker and no screen says its code with the bundled voice (`./voice.ts`). While it waits, a
+ * code on the outputs it was given (`pairing.display`, `pairing.speak`) and in its log. A device with
+ * a voice that has a speaker and no screen says its code with the bundled voice. While it waits, a
  * `pairing.scanner` reads enrollment codes from QR codes. The manifest's `pairing_methods` follow
  * from all this: `enrollment.provisioning` always, the others when the device can.
  *
- * Each connection is a WebRTC peer connection, offered to `POST /satellites/{device_id}/offer` with
- * the token: an audio track each way and the `nestor` data channel for `hello`/`welcome`, intents
- * (acknowledged) and observations. A refused token is forgotten and the device pairs again.
+ * The link is a WebSocket (`./link.ts`): `hello` with the manifest and the token, `welcome` back, then
+ * intents (acknowledged), the assistant's words, typed text and observations. A refused token (4401)
+ * is forgotten and the device pairs again; a link replaced by a newer one (4409) stops the satellite;
+ * any other end reconnects, waiting longer each time.
+ *
+ * The capabilities follow from what the driver provides: a `text.display` callback declares
+ * `text.display`, `text.input` declares `text.input`, a `voice` declares `audio.capture` and
+ * `audio.playback` as it can. Only once welcomed with audio allowed does the voice open the
+ * microphone and offer WebRTC (`POST /satellites/{device_id}/audio`); pairing and the link never wait
+ * for it, and failed audio is offered again while the link is up.
  */
 
+import type { MediaNeeds, Peer, SessionDescription, Voice } from "./audio.js";
 import type { Body } from "./body.js";
 import { readEnrollment } from "./codes.js";
-import { Dispatcher } from "./dispatch.js";
+import { Dispatcher, type TextDisplay } from "./dispatch.js";
 import { Messages } from "./i18n.js";
+import { LINK_CLOSE, linkUrl, OPEN, platformWebSocket, type WebSocketConstructor } from "./link.js";
 import { describe, type Logger, quietLogger } from "./log.js";
 import {
+  type CodeVoice,
   type EnrollOutcome,
   type Fetch,
   HttpError,
@@ -32,23 +42,29 @@ import {
 import {
   AUDIO_CAPTURE,
   AUDIO_PLAYBACK,
+  capability,
   type EnrollmentMethod,
   IDENTIFY,
-  type Manifest,
+  Manifest,
   PAIRING_METHODS,
   type PairingMethod,
   PERSON_DETECTION,
   ProtocolError,
   SPEECH_ACTIVITY,
+  TEXT_DISPLAY,
+  TEXT_INPUT,
 } from "./protocol.js";
 import type { TokenStore } from "./tokens.js";
-import { SpokenCode } from "./voice.js";
-import type { Peer, SessionDescription, WebRtc } from "./webrtc.js";
-import { hello, personDetected, type SatelliteMessage, speechActivity, type Welcome } from "./wire.js";
+import { hello, personDetected, type SatelliteMessage, speechActivity, textInput, type Welcome } from "./wire.js";
 
 /** An observation the device did not declare, or the household did not allow. */
 export class CapabilityNotAllowed extends ProtocolError {
   override name = "CapabilityNotAllowed";
+}
+
+/** A newer link of this device replaced this one (closed with 4409): the other one is current. */
+export class LinkReplaced extends Error {
+  override name = "LinkReplaced";
 }
 
 /** The core does not know this token any more: pair again. */
@@ -81,34 +97,76 @@ export interface PairingSetup extends Omit<PairingOutputs, "voice"> {
   /** The camera that reads pairing URIs from QR codes while the device waits: declares `enrollment.qr`. */
   readonly scanner?: QrScanner | undefined;
   /**
-   * Say the device code with the bundled voice, on the speaker the core's voice plays on (needs
-   * `audio.playback` and a `WebRtc` with a `speaker`). By default, when the device has a speaker and
-   * no `display`; never when `speak` is given.
+   * Say the device code with the bundled voice, on the speaker the core's voice plays on (needs a
+   * `voice` with a speaker). By default, when the device has a speaker and no `display`; never when
+   * `speak` is given.
    */
   readonly voice?: boolean;
   /** Delay between polls while waiting for a proof (about a second). */
   readonly pollMs?: number;
 }
 
+/** How the device talks with the assistant in writing. */
+export interface TextSetup {
+  /** Shows the assistant's words, in order; `final` marks the last message of a turn. Declares `text.display`. */
+  readonly display?: TextDisplay | undefined;
+  /** A person can type to the assistant on the device, through `sendText`. Declares `text.input`. */
+  readonly input?: boolean;
+}
+
 export interface SatelliteOptions {
-  /** The core's voice server, e.g. `http://nestor.local:8471`. */
+  /** The core's device server, e.g. `http://nestor.local:8471`. */
   readonly core: string;
-  /** What the device is and can do; its `pairing_methods` are set from `pairing`. */
+  /**
+   * What the device is and can do. Its `pairing_methods` are set from `pairing`, its `text.*` and
+   * `audio.*` capabilities from `text` and `voice`.
+   */
   readonly manifest: Manifest;
   readonly tokens: TokenStore;
-  readonly webrtc: WebRtc;
   readonly body?: Body;
   readonly pairing?: PairingSetup;
+  /** Writing: the assistant's words shown, text typed. */
+  readonly text?: TextSetup;
+  /** Talking aloud: `browserVoice()` (`@nestor-home/satellite/voice`) or `nodeVoice()` (`/node`). */
+  readonly voice?: Voice;
   /** The language of what the device says to people (`fr`, `en-GB`…); by default the platform's. */
   readonly locale?: string | readonly string[];
-  /** STUN/TURN URLs, only needed beyond the local network. */
-  readonly iceServers?: readonly string[];
-  /** First and longest delay between connection attempts. */
+  /** First and longest delay between attempts (link and audio). */
   readonly backoffMs?: readonly [number, number];
-  /** A connection not welcomed within this delay is dropped and tried again. */
+  /** A link not welcomed within this delay is closed and tried again. */
   readonly welcomeTimeoutMs?: number;
   readonly fetch?: Fetch;
+  /** The link's WebSocket; the platform's by default (browsers, Node 22 and later). */
+  readonly webSocket?: WebSocketConstructor;
   readonly logger?: Logger;
+}
+
+/** The capabilities what the driver provides stands for, and what each needs. */
+const PROVIDED = [
+  [TEXT_INPUT, "text.input: true"],
+  [TEXT_DISPLAY, "a text.display callback"],
+  [AUDIO_CAPTURE, "a voice with a microphone"],
+  [AUDIO_PLAYBACK, "a voice with a speaker"],
+] as const;
+
+/** The manifest with the `text.*` and `audio.*` capabilities the driver provides; one it does not is refused. */
+export function providedCapabilities(manifest: Manifest, text: TextSetup = {}, voice?: Voice): Manifest {
+  const has: Record<(typeof PROVIDED)[number][0], boolean> = {
+    [TEXT_INPUT]: text.input === true,
+    [TEXT_DISPLAY]: text.display !== undefined,
+    [AUDIO_CAPTURE]: voice?.capture === true,
+    [AUDIO_PLAYBACK]: voice?.playback === true,
+  };
+  const added = [];
+  for (const [name, needs] of PROVIDED) {
+    if (manifest.has(name) && !has[name]) throw new ProtocolError(`${name} is declared: it needs ${needs}`);
+    if (has[name] && !manifest.has(name)) added.push(capability(name));
+  }
+  if (added.length === 0) return manifest;
+  return new Manifest(manifest.device, [...manifest.capabilities, ...added], {
+    sdk: manifest.sdk,
+    pairingMethods: manifest.pairingMethods,
+  });
 }
 
 /** The pairing methods a driver supports, from what it provides; `voiced`: the bundled voice says the code. */
@@ -126,20 +184,24 @@ export function pairingMethods(setup: PairingSetup = {}, voiced = false): Pairin
 
 export class Satellite {
   readonly core: string;
-  /** The manifest sent: the one given, with the pairing methods this satellite supports. */
+  /** The manifest sent: the one given, with the capabilities and pairing methods the driver provides. */
   readonly manifest: Manifest;
   readonly messages: Messages;
   /** The last welcome: what the household allowed this device to do. */
   welcome: Welcome | null = null;
-  /** Connections made since `run` started (answered offers). */
+  /** Links opened since `run` started. */
   connections = 0;
+  /** Audio connections answered since `run` started. */
+  audioConnections = 0;
 
   private readonly options: SatelliteOptions;
   private readonly body: Body;
   private readonly logger: Logger;
   private readonly http: Fetch;
   private readonly pairing: Pairing;
-  private peer: Peer | null = null;
+  private readonly backoff: readonly [number, number];
+  /** Sends on the welcomed link; `null` while there is none. */
+  private sender: ((message: SatelliteMessage) => boolean) | null = null;
   private running = false;
   private paired = false;
 
@@ -150,9 +212,11 @@ export class Satellite {
     this.body = options.body ?? {};
     this.logger = options.logger ?? quietLogger;
     this.http = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.backoff = options.backoffMs ?? [500, 30_000];
     this.messages = new Messages(options.locale);
-    const voice = this.voice(setup);
-    this.manifest = options.manifest.withPairingMethods(pairingMethods(setup, voice !== undefined));
+    const manifest = providedCapabilities(options.manifest, options.text, options.voice);
+    const voice = this.codeVoice(setup);
+    this.manifest = manifest.withPairingMethods(pairingMethods(setup, voice !== undefined));
     const identify = this.body.identify?.bind(this.body);
     if (this.manifest.has(IDENTIFY) && identify === undefined) {
       throw new ProtocolError(`${IDENTIFY} is declared but the body has no identify()`);
@@ -176,16 +240,14 @@ export class Satellite {
   }
 
   /** The bundled voice, when it says the device code: a speaker, and neither `speak` nor (by default) a screen. */
-  private voice(setup: PairingSetup): SpokenCode | undefined {
-    const { manifest, webrtc } = this.options;
-    const speaker = manifest.has(AUDIO_PLAYBACK) ? webrtc.speaker : undefined;
-    if (setup.voice === true && speaker === undefined) {
-      throw new ProtocolError(`pairing.voice needs ${AUDIO_PLAYBACK} declared and a speaker`);
-    }
+  private codeVoice(setup: PairingSetup): CodeVoice | undefined {
+    const { voice } = this.options;
     const wanted = setup.speak === undefined && (setup.voice ?? setup.display === undefined);
-    return wanted && speaker !== undefined
-      ? new SpokenCode(speaker, this.messages, { logger: this.logger })
-      : undefined;
+    const spoken = wanted && voice?.playback ? voice.codeVoice?.(this.messages, this.logger) : undefined;
+    if (setup.voice === true && spoken === undefined) {
+      throw new ProtocolError("pairing.voice needs a voice with a speaker");
+    }
+    return spoken;
   }
 
   /** Whether the satellite waits for a person to pair it (its device code was presented). */
@@ -210,39 +272,44 @@ export class Satellite {
     return this.pairing.enroll(text, method);
   }
 
-  /** Whether a connection is up and welcomed. */
+  /** Whether the link is up and welcomed. */
   get connected(): boolean {
-    return this.peer !== null && this.welcome !== null;
+    return this.sender !== null && this.welcome !== null;
   }
 
   /**
-   * Run until `signal` aborts: pair when needed, connect, and reconnect with a growing delay.
-   * Rejects only when the audio devices cannot open (a declared microphone that is missing), or with
-   * a `PairingError` when the core will never pair it (another protocol version).
+   * Run until `signal` aborts: pair when needed, hold the link, and reconnect with a growing delay.
+   * Rejects with a `PairingError` when the core will never pair the device (another protocol
+   * version), and with `LinkReplaced` when a newer link of this device took over.
    */
   async run(signal?: AbortSignal): Promise<void> {
     if (this.running) throw new Error("this satellite is already running");
     this.running = true;
-    const { webrtc, backoffMs = [500, 30_000] } = this.options;
+    const [first, longest] = this.backoff;
     try {
-      await webrtc.open?.({ capture: this.manifest.has(AUDIO_CAPTURE), playback: this.manifest.has(AUDIO_PLAYBACK) });
-      let delay = backoffMs[0];
+      let delay = first;
       while (!signal?.aborted) {
         let welcomed = false;
         try {
-          welcomed = await this.connectOnce(await this.token(signal), signal);
-        } catch (error) {
+          const closed = await this.linkOnce(await this.token(signal), signal);
+          welcomed = closed.welcomed;
           if (signal?.aborted) break;
-          if (error instanceof PairingError) throw error;
-          if (error instanceof Refused) {
+          if (closed.code === LINK_CLOSE.tokenRefused) {
             this.logger.warn(this.messages.format("token-refused"));
             this.paired = false;
             await this.options.tokens.forget();
             continue;
           }
+          if (closed.code === LINK_CLOSE.replaced) throw new LinkReplaced(this.messages.format("link-replaced"));
+          const why = `closed with ${closed.code}${closed.reason ? `: ${closed.reason}` : ""}`;
+          if (closed.code === LINK_CLOSE.stopping) this.logger.info(`link ${why}, reconnecting`);
+          else this.logger.warn(this.messages.format("link-failed", { error: why }));
+        } catch (error) {
+          if (signal?.aborted) break;
+          if (error instanceof PairingError || error instanceof LinkReplaced) throw error;
           this.logger.warn(this.messages.format("link-failed", { error: describe(error) }));
         }
-        delay = welcomed ? backoffMs[0] : Math.min(delay * 2, backoffMs[1]);
+        delay = welcomed ? first : Math.min(delay * 2, longest);
         try {
           await sleep(delay, signal);
         } catch {
@@ -251,27 +318,41 @@ export class Satellite {
       }
     } finally {
       this.running = false;
-      await webrtc.close?.();
+      await this.options.voice
+        ?.close()
+        .catch((error: unknown) => this.logger.debug(`closing the voice: ${describe(error)}`));
     }
+  }
+
+  /**
+   * Send what a person typed on the device (`text.input`, declared and allowed): a turn of the
+   * conversation of its room. `false` when the link is down (text is not queued).
+   */
+  sendText(text: string): boolean {
+    this.allowed(TEXT_INPUT, "typed text");
+    const message = textInput(text);
+    return this.sender?.(message) ?? false;
   }
 
   /** Report people seen now; `false` when not connected (observations are not queued). */
   personDetected(count: number, confidence: number): boolean {
-    return this.observe(PERSON_DETECTION, () => personDetected(count, confidence));
+    this.allowed(PERSON_DETECTION, "this observation");
+    const message = personDetected(count, confidence);
+    return this.sender?.(message) ?? false;
   }
 
   /** Report that voice activity started or stopped on the device. */
   speechActivity(active: boolean): boolean {
-    return this.observe(SPEECH_ACTIVITY, () => speechActivity(active));
+    this.allowed(SPEECH_ACTIVITY, "this observation");
+    const message = speechActivity(active);
+    return this.sender?.(message) ?? false;
   }
 
-  private observe(capability: string, build: () => SatelliteMessage): boolean {
+  private allowed(capability: string, what: string): void {
     const allowed = this.welcome?.capabilities ?? this.manifest.names;
     if (!this.manifest.has(capability) || !allowed.has(capability)) {
-      throw new CapabilityNotAllowed(`this observation needs the ${capability} capability, declared and allowed`);
+      throw new CapabilityNotAllowed(`${what} needs the ${capability} capability, declared and allowed`);
     }
-    const message = build();
-    return this.peer?.send(JSON.stringify(message)) ?? false;
   }
 
   private async token(signal: AbortSignal | undefined): Promise<string> {
@@ -319,71 +400,138 @@ export class Satellite {
     return stop;
   }
 
-  /** One connection, until the core hangs up or the link fails; whether it was welcomed. */
-  private async connectOnce(token: string, signal: AbortSignal | undefined): Promise<boolean> {
-    const { webrtc, iceServers = [], welcomeTimeoutMs = 15_000 } = this.options;
-    let end: (reason: string) => void = () => {};
-    const ended = new Promise<string>((resolve) => {
-      end = resolve;
+  /** One link, until it closes: its close code, and whether it was welcomed. */
+  private async linkOnce(
+    token: string,
+    signal: AbortSignal | undefined,
+  ): Promise<{ code: number; reason: string; welcomed: boolean }> {
+    const Socket = this.options.webSocket ?? platformWebSocket();
+    if (Socket === undefined) throw new Error("this platform has no WebSocket");
+    const { welcomeTimeoutMs = 15_000 } = this.options;
+    let end: (code: number, reason: string) => void = () => {};
+    const ended = new Promise<{ code: number; reason: string }>((resolve) => {
+      end = (code, reason) => resolve({ code, reason });
     });
     let welcomed = false;
-    let peer: Peer | null = null;
-    const send = (message: SatelliteMessage) => peer?.send(JSON.stringify(message)) ?? false;
-    const dispatcher = new Dispatcher(this.body, send, this.logger);
-    peer = await webrtc.createPeer({
-      iceServers,
-      events: {
-        onOpen: () => send(hello(this.manifest)),
-        onMessage: (text) => {
-          const outcome = dispatcher.handle(text);
-          if (outcome === "welcomed") {
-            this.welcome = dispatcher.welcome;
-            if (!welcomed) {
-              welcomed = true;
-              this.logger.info(`welcomed in ${this.welcome?.room ?? "?"}`);
-              this.body.connected?.(true);
-            }
-          } else if (outcome === "hung-up") {
-            end("the core hung up");
-          }
-        },
-        onClosed: end,
-        onAudio: () => this.body.heartbeat?.(),
-      },
-    });
-    const stop = () => end("stopped");
-    signal?.addEventListener("abort", stop, { once: true });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const answer = await this.offer(await peer.offer(), token, signal);
-      await peer.accept(answer);
-      this.peer = peer;
+    const audio = new AbortController();
+    let audioDone: Promise<void> = Promise.resolve();
+    const socket = new Socket(linkUrl(this.core, this.manifest.device.id));
+    const send = (message: SatelliteMessage) => {
+      if (socket.readyState !== OPEN) return false;
+      socket.send(JSON.stringify(message));
+      return true;
+    };
+    const dispatcher = new Dispatcher(this.body, send, this.logger, this.options.text?.display);
+    socket.onopen = () => {
       this.connections += 1;
-      timer = setTimeout(() => welcomed || end(`not welcomed within ${welcomeTimeoutMs} ms`), welcomeTimeoutMs);
-      this.logger.info(`link ended: ${await ended}`);
-      return welcomed;
+      send(hello(this.manifest, token));
+    };
+    socket.onmessage = (event) => {
+      if (typeof event.data !== "string") {
+        this.logger.warn("ignoring a binary message on the link");
+        return;
+      }
+      if (dispatcher.handle(event.data) !== "welcomed") return;
+      this.welcome = dispatcher.welcome;
+      if (welcomed) return;
+      welcomed = true;
+      this.sender = send;
+      this.logger.info(`welcomed in ${this.welcome?.room ?? "?"}`);
+      this.call(() => this.body.connected?.(true));
+      const needs = this.audioNeeds();
+      if (needs !== null) {
+        audioDone = this.audio(token, needs, audio.signal, () => {
+          end(LINK_CLOSE.tokenRefused, "the audio offer's token was refused");
+        });
+      }
+    };
+    socket.onclose = (event) => end(event.code, event.reason);
+    socket.onerror = () => {}; // the close that follows says why
+    const stop = () => end(1000, "stopped");
+    signal?.addEventListener("abort", stop, { once: true });
+    const timer = setTimeout(() => welcomed || end(0, `not welcomed within ${welcomeTimeoutMs} ms`), welcomeTimeoutMs);
+    try {
+      const closed = await ended;
+      return { ...closed, welcomed };
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", stop);
-      this.peer = null;
-      if (welcomed) this.body.connected?.(false);
-      await peer.close();
+      socket.onopen = socket.onmessage = socket.onclose = null;
+      if (socket.readyState <= OPEN) socket.close(1000);
+      this.sender = null;
+      audio.abort();
+      await audioDone;
+      if (welcomed) this.call(() => this.body.connected?.(false));
     }
   }
 
-  private async offer(
-    offer: SessionDescription,
-    token: string,
-    signal: AbortSignal | undefined,
-  ): Promise<SessionDescription> {
-    const response = await this.http(`${this.core}/satellites/${encodeURIComponent(this.manifest.device.id)}/offer`, {
+  /** What the voice opens, from what the welcome allowed; `null` for no audio at all (A1). */
+  private audioNeeds(): MediaNeeds | null {
+    const { voice } = this.options;
+    const allowed = this.welcome?.capabilities;
+    if (voice === undefined || allowed === undefined) return null;
+    const needs = {
+      capture: voice.capture && allowed.has(AUDIO_CAPTURE),
+      playback: voice.playback && allowed.has(AUDIO_PLAYBACK),
+    };
+    return needs.capture || needs.playback ? needs : null;
+  }
+
+  /** Audio while the link is up: offered, and offered again with a growing delay when it fails (A3). */
+  private async audio(token: string, needs: MediaNeeds, stop: AbortSignal, refused: () => void): Promise<void> {
+    const voice = this.options.voice as Voice;
+    const [first, longest] = this.backoff;
+    let delay = first;
+    while (!stop.aborted) {
+      let peer: Peer | null = null;
+      let finish: (reason: string) => void = () => {};
+      const over = new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+      const linkEnded = () => finish("the link ended");
+      stop.addEventListener("abort", linkEnded, { once: true });
+      try {
+        await voice.open(needs);
+        stop.throwIfAborted();
+        peer = await voice.createPeer({
+          events: { onClosed: (reason) => finish(reason), onAudio: () => this.call(() => this.body.heartbeat?.()) },
+        });
+        await peer.accept(await this.offerAudio(await peer.offer(), token, stop));
+        this.audioConnections += 1;
+        delay = first;
+        this.logger.info("audio connected");
+        const reason = await over;
+        if (!stop.aborted) this.logger.warn(this.messages.format("audio-failed", { error: reason }));
+      } catch (error) {
+        if (stop.aborted) break;
+        if (error instanceof Refused) {
+          refused();
+          break;
+        }
+        this.logger.warn(this.messages.format("audio-failed", { error: describe(error) }));
+      } finally {
+        stop.removeEventListener("abort", linkEnded);
+        await peer?.close();
+        await voice.close().catch((error: unknown) => this.logger.debug(`closing the voice: ${describe(error)}`));
+      }
+      try {
+        await sleep(delay, stop);
+      } catch {
+        break;
+      }
+      delay = Math.min(delay * 2, longest);
+    }
+  }
+
+  private async offerAudio(offer: SessionDescription, token: string, signal: AbortSignal): Promise<SessionDescription> {
+    const response = await this.http(`${this.core}/satellites/${encodeURIComponent(this.manifest.device.id)}/audio`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
-      ...(signal === undefined ? {} : { signal }),
+      signal,
     });
     if (response.status === 401) throw new Refused("token refused");
-    if (!response.ok) throw new HttpError(response.status, `offer: HTTP ${response.status}`);
+    if (!response.ok) throw new HttpError(response.status, `audio offer: HTTP ${response.status}`);
     const answer: unknown = await response.json();
     if (
       typeof answer !== "object" ||
@@ -393,8 +541,17 @@ export class Satellite {
       !("type" in answer) ||
       answer.type !== "answer"
     ) {
-      throw new HttpError(502, "offer: the core did not answer with an SDP answer");
+      throw new HttpError(502, "audio offer: the core did not answer with an SDP answer");
     }
     return { sdp: answer.sdp, type: "answer" };
+  }
+
+  /** A failing body is the driver's bug: it is logged, never allowed to break the link. */
+  private call(action: () => void): void {
+    try {
+      action();
+    } catch (error) {
+      this.logger.warn(`the body failed: ${describe(error)}`);
+    }
   }
 }

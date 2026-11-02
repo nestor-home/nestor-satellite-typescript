@@ -1,21 +1,16 @@
 /**
- * Write a Nestor satellite in TypeScript: pair with the core, stream audio over WebRTC, carry out
- * its intents and report observations, following the `nestor.satellite/1` protocol.
+ * Write a Nestor satellite in TypeScript: pair with the core, hold its link, talk with the assistant
+ * in writing, carry out its intents and report observations, following the `nestor.satellite/1`
+ * protocol.
  *
- * This entry point runs anywhere (browsers, Node, workers): it touches no platform API until a
- * `WebRtc` adapter does. Node's adapter, audio and token file live in `@nestor-home/satellite/node`.
+ * This entry point runs anywhere (browsers, Node, workers) and needs no WebRTC: the link is the
+ * platform's `WebSocket`. A satellite that talks aloud adds a voice: `browserVoice` in
+ * `@nestor-home/satellite/voice`, `nodeVoice` (with the audio and token file) in
+ * `@nestor-home/satellite/node`.
  */
 
+export type { MediaNeeds, Peer, PeerEvents, PeerOptions, SessionDescription, Voice } from "./audio.js";
 export type { Body } from "./body.js";
-export {
-  type AudioContextLike,
-  type AudioElementLike,
-  type BrowserWebRtcOptions,
-  browserSpeech,
-  browserWebRtc,
-  type SpeechSynthesisLike,
-  webAudioSpeaker,
-} from "./browser.js";
 export {
   DEVICE_CODE,
   ENROLLMENT_ALPHABET,
@@ -26,8 +21,14 @@ export {
   parsePairingUri,
   readEnrollment,
 } from "./codes.js";
-export { Dispatcher, type Outcome } from "./dispatch.js";
+export { Dispatcher, type Outcome, type TextDisplay } from "./dispatch.js";
 export { LOCALES, type Locale, type MessageArgs, type MessageId, Messages, negotiateLocale } from "./i18n.js";
+export {
+  LINK_CLOSE,
+  linkUrl,
+  type WebSocketConstructor,
+  type WebSocketLike,
+} from "./link.js";
 export { type Logger, quietLogger } from "./log.js";
 export {
   type CodeVoice,
@@ -69,14 +70,19 @@ export {
   SDK,
   type Sdk,
   SPEECH_ACTIVITY,
+  TEXT_DISPLAY,
+  TEXT_INPUT,
 } from "./protocol.js";
 export {
   CapabilityNotAllowed,
+  LinkReplaced,
   type PairingSetup,
   pairingMethods,
+  providedCapabilities,
   type QrScanner,
   Satellite,
   type SatelliteOptions,
+  type TextSetup,
 } from "./satellite.js";
 export {
   type DeviceState,
@@ -89,28 +95,4 @@ export {
   type TokenStore,
 } from "./tokens.js";
 export { SDK_NAME, SDK_VERSION } from "./version.js";
-export {
-  AHEAD_MS,
-  announcement,
-  type Clock,
-  clipKey,
-  decodeWav,
-  resample,
-  type Speaker,
-  SpokenCode,
-  type SpokenCodeOptions,
-  type Step,
-  type VoiceIndex,
-  voiceMessages,
-} from "./voice.js";
-export type {
-  AudioBridge,
-  W3cDataChannel,
-  W3cPeerConnection,
-  W3cPeerConnectionConstructor,
-  W3cTrack,
-  W3cTrackEvent,
-} from "./w3c.js";
-export { W3cPeer } from "./w3c.js";
-export type { MediaNeeds, Peer, PeerEvents, PeerOptions, SessionDescription, WebRtc } from "./webrtc.js";
 export * as wire from "./wire.js";

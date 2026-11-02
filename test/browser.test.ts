@@ -1,37 +1,21 @@
-/** The browser adapter and the W3C peer, over a scripted `RTCPeerConnection` (real browsers: `pnpm conformance`). */
+/** The browser's voice and the W3C peer, over a scripted `RTCPeerConnection` (real browsers: `pnpm conformance`). */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Messages, type PeerEvents, quietLogger } from "../src/index.js";
 import {
   type AudioElementLike,
   browserSpeech,
-  browserWebRtc,
-  type PeerEvents,
-  type W3cDataChannel,
+  browserVoice,
   type W3cTrack,
   type W3cTrackEvent,
   webAudioSpeaker,
-} from "../src/index.js";
+} from "../src/voice/index.js";
 
 class Track implements W3cTrack {
   stopped = false;
   constructor(readonly kind = "audio") {}
   stop() {
     this.stopped = true;
-  }
-}
-
-class Channel implements W3cDataChannel {
-  readyState = "connecting";
-  sent: string[] = [];
-  onopen: ((event: unknown) => void) | null = null;
-  onmessage: ((event: { readonly data: unknown }) => void) | null = null;
-  onclose: ((event: unknown) => void) | null = null;
-  constructor(readonly label: string) {}
-  send(data: string) {
-    this.sent.push(data);
-  }
-  close() {
-    this.readyState = "closed";
   }
 }
 
@@ -43,7 +27,6 @@ class Connection {
   onicegatheringstatechange: ((event: unknown) => void) | null = null;
   onconnectionstatechange: ((event: unknown) => void) | null = null;
   ontrack: ((event: W3cTrackEvent) => void) | null = null;
-  channels: Channel[] = [];
   tracks: W3cTrack[] = [];
   transceivers: string[] = [];
   remote: { sdp: string; type: string } | null = null;
@@ -51,11 +34,6 @@ class Connection {
 
   constructor(readonly configuration: { iceServers: { urls: string }[] }) {
     Connection.last = this;
-  }
-  createDataChannel(label: string) {
-    const channel = new Channel(label);
-    this.channels.push(channel);
-    return channel;
   }
   addTrack(track: W3cTrack) {
     this.tracks.push(track);
@@ -87,8 +65,6 @@ function events(): PeerEvents & { log: unknown[] } {
   const log: unknown[] = [];
   return {
     log,
-    onOpen: () => log.push("open"),
-    onMessage: (text) => log.push(text),
     onClosed: (reason) => log.push(`closed: ${reason}`),
     onAudio: () => log.push("audio"),
   };
@@ -115,96 +91,85 @@ afterEach(() => {
 });
 
 describe("in a browser", () => {
-  it("sends the microphone and offers once every ICE candidate is gathered", async () => {
+  it("sends the microphone, audio only, and offers once every ICE candidate is gathered", async () => {
     browser();
-    const webrtc = browserWebRtc({ element });
-    await webrtc.open?.({ capture: true, playback: true });
-    const peer = await webrtc.createPeer({ iceServers: ["stun:stun.example:3478"], events: events() });
+    const voice = browserVoice({ element, iceServers: ["stun:stun.example:3478"] });
+    expect([voice.capture, voice.playback]).toEqual([true, true]);
+    await voice.open({ capture: true, playback: true });
+    const peer = await voice.createPeer({ events: events() });
     const pc = Connection.last as Connection;
     expect(pc.configuration).toEqual({ iceServers: [{ urls: "stun:stun.example:3478" }] });
     expect(pc.tracks).toEqual([microphone]);
-    expect(pc.channels.map((c) => c.label)).toEqual(["nestor"]);
     expect(await peer.offer()).toEqual({ sdp: "v=0 no candidates yet + candidates", type: "offer" });
     await peer.accept({ sdp: "answer", type: "answer" });
     expect(pc.remote).toEqual({ sdp: "answer", type: "answer" });
   });
 
-  it("carries the data channel's messages both ways, only once it is open", async () => {
-    browser();
-    const webrtc = browserWebRtc();
-    await webrtc.open?.({ capture: false, playback: false });
-    const seen = events();
-    const peer = await webrtc.createPeer({ iceServers: [], events: seen });
-    const channel = (Connection.last as Connection).channels[0] as Channel;
-    expect(peer.send("early")).toBe(false);
-    channel.readyState = "open";
-    channel.onopen?.({});
-    channel.onmessage?.({ data: '{"type":"welcome"}' });
-    channel.onmessage?.({ data: new TextEncoder().encode('{"type":"bytes"}') });
-    expect(peer.send("hello")).toBe(true);
-    expect(channel.sent).toEqual(["hello"]);
-    expect(seen.log).toEqual(["open", '{"type":"welcome"}', '{"type":"bytes"}']);
+  it("declares only the audio it has", () => {
+    expect([browserVoice({ microphone: false }).capture, browserVoice({ microphone: false }).playback]).toEqual([
+      false,
+      true,
+    ]);
+    expect(browserVoice({ element: null }).playback).toBe(false);
   });
 
-  it("ends the peer when the channel closes or the connection fails, and closes everything once", async () => {
+  it("ends the peer when the connection fails, and closes everything once", async () => {
     browser();
-    const webrtc = browserWebRtc();
-    await webrtc.open?.({ capture: false, playback: false });
+    const voice = browserVoice();
+    await voice.open({ capture: false, playback: false });
     const seen = events();
-    const peer = await webrtc.createPeer({ iceServers: [], events: seen });
+    const peer = await voice.createPeer({ events: seen });
     const pc = Connection.last as Connection;
     pc.connectionState = "failed";
     pc.onconnectionstatechange?.({});
-    (pc.channels[0] as Channel).onclose?.({});
-    expect(seen.log).toEqual(["closed: the connection failed", "closed: the data channel closed"]);
+    expect(seen.log).toEqual(["closed: the connection failed"]);
     await peer.close();
     await peer.close();
     expect(pc.closed).toBe(true);
-    expect(peer.send("late")).toBe(false);
   });
 
-  it("without audio.capture, receives without asking for the microphone", async () => {
+  it("without audio.capture allowed, receives without asking for the microphone", async () => {
     const getUserMedia = vi.fn();
     browser({ getUserMedia });
-    const webrtc = browserWebRtc();
-    await webrtc.open?.({ capture: false, playback: true });
-    await webrtc.createPeer({ iceServers: [], events: events() });
+    const voice = browserVoice();
+    await voice.open({ capture: false, playback: true });
+    await voice.createPeer({ events: events() });
     expect(getUserMedia).not.toHaveBeenCalled();
     expect((Connection.last as Connection).transceivers).toEqual(["audio"]);
   });
 
   it("plays the core's voice in the element, and stops the microphone when closed", async () => {
     browser();
-    const webrtc = browserWebRtc({ element });
-    await webrtc.open?.({ capture: true, playback: true });
+    const voice = browserVoice({ element });
+    await voice.open({ capture: true, playback: true });
     const seen = events();
-    const peer = await webrtc.createPeer({ iceServers: [], events: seen });
+    const peer = await voice.createPeer({ events: seen });
     const stream = { id: "remote" };
     (Connection.last as Connection).ontrack?.({ track: new Track(), streams: [stream] });
     expect(element.srcObject).toBe(stream);
     expect(element.played).toBeGreaterThan(0);
     expect(seen.log).toEqual(["audio"]);
     await peer.close();
-    await webrtc.close?.();
+    await voice.close();
     expect(element.srcObject).toBeNull();
     expect(microphone.stopped).toBe(true);
   });
 
-  it("fails clearly when audio.capture is declared and no microphone can open", async () => {
+  it("fails clearly when the microphone cannot open", async () => {
     browser();
     vi.stubGlobal("navigator", {}); // an insecure context: no mediaDevices
-    await expect(browserWebRtc().open?.({ capture: true, playback: false })).rejects.toThrow(/https or localhost/);
+    await expect(browserVoice().open({ capture: true, playback: false })).rejects.toThrow(/https or localhost/);
     browser({
       getUserMedia: async () => {
         throw new Error("NotAllowedError");
       },
     });
-    await expect(browserWebRtc().open?.({ capture: true, playback: false })).rejects.toThrow(/NotAllowedError/);
+    await expect(browserVoice().open({ capture: true, playback: false })).rejects.toThrow(/NotAllowedError/);
   });
 
   it("fails clearly where there is no WebRTC", async () => {
     vi.stubGlobal("RTCPeerConnection", undefined);
-    await expect(browserWebRtc().open?.({ capture: false, playback: false })).rejects.toThrow(/no WebRTC/);
+    await expect(browserVoice().open({ capture: false, playback: false })).rejects.toThrow(/no WebRTC/);
   });
 });
 
@@ -280,10 +245,12 @@ describe("the bundled voice in a browser", () => {
   });
 
   it("is not there in a browser without Web Audio, nor when the page says it has no speaker", () => {
+    const codeVoice = (voice: ReturnType<typeof browserVoice>) => voice.codeVoice?.(new Messages("en"), quietLogger);
     expect(webAudioSpeaker()).toBeUndefined(); // Node has no AudioContext
-    expect(browserWebRtc().speaker).toBeUndefined();
-    const context = () => new Context();
-    expect(browserWebRtc({ speaker: webAudioSpeaker({ context }) ?? null }).speaker).toBeDefined();
-    expect(browserWebRtc({ speaker: null }).speaker).toBeUndefined();
+    expect(codeVoice(browserVoice())).toBeUndefined();
+    const speaker = webAudioSpeaker({ context: () => new Context() }) ?? null;
+    expect(codeVoice(browserVoice({ speaker }))).toBeDefined();
+    expect(codeVoice(browserVoice({ speaker, element: null }))).toBeUndefined();
+    expect(codeVoice(browserVoice({ speaker: null }))).toBeUndefined();
   });
 });

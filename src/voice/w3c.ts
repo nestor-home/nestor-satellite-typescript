@@ -6,21 +6,12 @@
  * the DOM typings nor a Node library's leak into the SDK's public types.
  */
 
-import { describe, type Logger } from "./log.js";
-import type { Peer, PeerEvents, PeerOptions, SessionDescription } from "./webrtc.js";
+import type { Peer, PeerEvents, PeerOptions, SessionDescription } from "../audio.js";
+import { describe, type Logger } from "../log.js";
 
 export interface W3cTrack {
   readonly kind: string;
   stop(): void;
-}
-
-export interface W3cDataChannel {
-  readonly readyState: string;
-  send(data: string): void;
-  close(): void;
-  onopen: ((event: unknown) => void) | null;
-  onmessage: ((event: { readonly data: unknown }) => void) | null;
-  onclose: ((event: unknown) => void) | null;
 }
 
 export interface W3cTrackEvent {
@@ -35,7 +26,6 @@ export interface W3cPeerConnection {
   onicegatheringstatechange: ((event: unknown) => void) | null;
   onconnectionstatechange: ((event: unknown) => void) | null;
   ontrack: ((event: W3cTrackEvent) => void) | null;
-  createDataChannel(label: string, init?: { ordered?: boolean }): W3cDataChannel;
   addTrack(track: W3cTrack, ...streams: unknown[]): unknown;
   addTransceiver(kind: string, init?: { direction?: string }): unknown;
   createOffer(): Promise<{ readonly sdp?: string; readonly type: string }>;
@@ -54,18 +44,15 @@ export interface AudioBridge {
   incoming(event: W3cTrackEvent, onAudio: () => void): () => void;
 }
 
-export const CHANNEL = "nestor";
-
 export class W3cPeer implements Peer {
   private readonly pc: W3cPeerConnection;
-  private readonly channel: W3cDataChannel;
   private readonly stops: (() => void)[] = [];
   private closed = false;
 
   constructor(
     Connection: W3cPeerConnectionConstructor,
     audio: AudioBridge,
-    options: PeerOptions,
+    options: PeerOptions & { readonly iceServers: readonly string[] },
     private readonly logger: Logger,
     private readonly gatherTimeoutMs = 3000,
   ) {
@@ -74,14 +61,6 @@ export class W3cPeer implements Peer {
     const track = audio.outgoing();
     if (track === null) this.pc.addTransceiver("audio", { direction: "sendrecv" });
     else this.pc.addTrack(track);
-    this.channel = this.pc.createDataChannel(CHANNEL, { ordered: true });
-    this.channel.onopen = () => events.onOpen();
-    this.channel.onmessage = (event) => {
-      const text = asText(event.data);
-      if (text === null) this.logger.warn("ignoring a binary message on the nestor channel");
-      else events.onMessage(text);
-    };
-    this.channel.onclose = () => this.end(events, "the data channel closed");
     this.pc.onconnectionstatechange = () => {
       const state = this.pc.connectionState;
       if (state === "failed" || state === "closed") this.end(events, `the connection ${state}`);
@@ -109,12 +88,6 @@ export class W3cPeer implements Peer {
     await this.pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
   }
 
-  send(text: string): boolean {
-    if (this.closed || this.channel.readyState !== "open") return false;
-    this.channel.send(text);
-    return true;
-  }
-
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -125,9 +98,7 @@ export class W3cPeer implements Peer {
         this.logger.debug(`stopping the core's audio: ${describe(error)}`);
       }
     }
-    this.channel.onopen = this.channel.onmessage = this.channel.onclose = null;
     this.pc.onconnectionstatechange = this.pc.ontrack = this.pc.onicegatheringstatechange = null;
-    this.channel.close();
     this.pc.close();
   }
 
@@ -151,10 +122,4 @@ export class W3cPeer implements Peer {
       };
     });
   }
-}
-
-function asText(data: unknown): string | null {
-  if (typeof data === "string") return data;
-  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
-  return null;
 }

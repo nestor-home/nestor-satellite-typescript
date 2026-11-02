@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { type Body, Dispatcher, type Logger, type wire } from "../src/index.js";
+import { type Body, Dispatcher, type Logger, type TextDisplay, type wire } from "../src/index.js";
 
 const message = (type: string, payload: Record<string, unknown>, id = "m-1") => ({
   type,
@@ -8,10 +8,10 @@ const message = (type: string, payload: Record<string, unknown>, id = "m-1") => 
   payload,
 });
 
-function setup(body: Body = {}) {
+function setup(body: Body = {}, display?: TextDisplay) {
   const replies: wire.AckMessage[] = [];
   const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
-  const dispatcher = new Dispatcher(body, (reply) => replies.push(reply), logger);
+  const dispatcher = new Dispatcher(body, (reply) => replies.push(reply), logger, display);
   const handle = (data: unknown) => dispatcher.handle(typeof data === "string" ? data : JSON.stringify(data));
   return { dispatcher, replies, logger, handle };
 }
@@ -47,10 +47,19 @@ describe("the dispatcher", () => {
     expect(replies).toEqual([]);
   });
 
-  it("notices the core hanging up and ignores the transport's other messages", () => {
-    const { handle } = setup();
-    expect(handle({ type: "signalling", message: { type: "peerLeft" } })).toBe("hung-up");
-    expect(handle({ type: "signalling", message: { type: "renegotiate" } })).toBe("nothing");
+  it("shows the assistant's words on the text display, and acknowledges them, even with no display", () => {
+    const shown: [string, boolean][] = [];
+    const { handle, replies } = setup({}, (text, final) => shown.push([text, final]));
+    handle(message("intent.text", { text: "Je regarde.", final: false }, "t-1"));
+    handle(message("intent.text", { text: "Il est midi." }, "t-2"));
+    expect(shown).toEqual([
+      ["Je regarde.", false],
+      ["Il est midi.", true],
+    ]);
+    expect(replies.map((r) => r.payload.of)).toEqual(["t-1", "t-2"]);
+    const blind = setup();
+    blind.handle(message("intent.text", { text: "Bonjour." }, "t-3"));
+    expect(blind.replies.map((r) => r.payload.of)).toEqual(["t-3"]);
   });
 
   it("logs and drops what is off-contract, without acknowledging it", () => {

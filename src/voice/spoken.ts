@@ -8,12 +8,12 @@
  * SDKs ship the same clips (recorded by nestor-satellite-python's `scripts/voice.py`) and read them
  * the same way. A language without clips is said in English.
  *
- * The clips reach the speaker through the `Speaker` port: `nodeWebRtc` writes them to its
- * `AudioSink`, `browserWebRtc` plays them with Web Audio.
+ * The clips reach the speaker through the `Speaker` port: `nodeVoice` writes them to its
+ * `AudioSink`, `browserVoice` plays them with Web Audio.
  */
 
-import { Messages } from "./i18n.js";
-import { describe, type Logger, quietLogger } from "./log.js";
+import { Messages } from "../i18n.js";
+import { describe, type Logger, quietLogger } from "../log.js";
 
 /** Where the SDK plays what it says itself: the device's speaker, and the bundled clips. */
 export interface Speaker {

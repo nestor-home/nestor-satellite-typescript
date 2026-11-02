@@ -1,7 +1,7 @@
 /**
- * Node side of `@nestor-home/satellite`: WebRTC through `@roamhq/wrtc` (an optional peer
- * dependency), PCM audio sources and sinks (which also say the device code with the bundled voice),
- * and a token file only its owner can read.
+ * Node side of `@nestor-home/satellite`: a voice over WebRTC through `@roamhq/wrtc` (an optional
+ * peer dependency), PCM audio sources and sinks (which also say the device code with the bundled
+ * voice), and a token file only its owner can read.
  */
 
 export {
@@ -28,8 +28,8 @@ export { FileTokenStore } from "./tokens.js";
 export { sinkSpeaker, voiceFile } from "./voice.js";
 export {
   loadWrtc,
-  type NodeWebRtcOptions,
-  nodeWebRtc,
+  type NodeVoiceOptions,
+  nodeVoice,
   type RTCAudioData,
   toMono,
   type WrtcModule,

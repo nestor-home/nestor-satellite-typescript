@@ -20,9 +20,17 @@ describe("what a satellite sends", () => {
     expect(Math.abs(Date.parse(first.at) - Date.now())).toBeLessThan(1000);
   });
 
-  it("carries the manifest in hello", () => {
+  it("carries the manifest and the token in hello", () => {
     const manifest = Manifest.of({ id: "a", model: "m", room: "r" }, "audio.capture");
-    expect(wire.hello(manifest).payload.manifest).toEqual(manifest.toJSON());
+    expect(wire.hello(manifest, "nst1_x").payload).toEqual({ manifest: manifest.toJSON(), token: "nst1_x" });
+    expect(() => wire.hello(manifest, "")).toThrow(ProtocolError);
+  });
+
+  it("sends typed text of 1 to 4,000 characters, counted as the core counts them", () => {
+    expect(wire.textInput("Allume la lumière").payload).toEqual({ text: "Allume la lumière" });
+    expect(() => wire.textInput("")).toThrow(ProtocolError);
+    expect(() => wire.textInput("a".repeat(4001))).toThrow(ProtocolError);
+    expect(wire.textInput("🙂".repeat(4000)).payload.text).toHaveLength(8000); // 4,000 characters, 8,000 UTF-16 units
   });
 
   it("refuses observations that the core would reject", () => {
@@ -51,6 +59,15 @@ describe("reading the core", () => {
     });
     expect(wire.parse(of("intent.beat", {})).message).toEqual({ type: "intent.beat" });
     expect(wire.parse(of("intent.identify", {})).message).toEqual({ type: "intent.identify" });
+    expect(wire.parse(of("intent.text", { text: "Je regarde.", final: false })).message).toEqual({
+      type: "intent.text",
+      text: "Je regarde.",
+      final: false,
+    });
+  });
+
+  it("takes the assistant's words as the last of their turn when the core does not say", () => {
+    expect(wire.parse(of("intent.text", { text: "Il est midi." })).message).toMatchObject({ final: true });
   });
 
   it("gives an expression its full intensity when the core does not say", () => {
@@ -77,14 +94,11 @@ describe("reading the core", () => {
     ["capabilities that are not strings", of("welcome", { device_id: "a", room: "r", capabilities: [1] })],
     ["a welcome without its room", of("welcome", { device_id: "a", capabilities: [] })],
     ["an identify with a payload", of("intent.identify", { seconds: 3 })],
+    ["empty text", of("intent.text", { text: "" })],
+    ["text too long", of("intent.text", { text: "a".repeat(16_001) })],
+    ["a final that is not a boolean", of("intent.text", { text: "ok", final: "yes" })],
   ])("refuses a known message with %s", (_case, data) => {
     expect(() => wire.parse(data)).toThrow(ProtocolError);
-  });
-
-  it("tells the transport's messages apart, and notices the core leaving", () => {
-    expect(wire.signalling({ type: "signalling", message: { type: "peerLeft" } })).toEqual({ hungUp: true });
-    expect(wire.signalling({ type: "signalling", message: { type: "renegotiate" } })).toEqual({ hungUp: false });
-    expect(wire.signalling(of("intent.beat", {}))).toBeNull();
   });
 });
 

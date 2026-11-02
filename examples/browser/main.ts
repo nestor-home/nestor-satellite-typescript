@@ -1,26 +1,18 @@
 /// <reference types="vite/client" />
 
 /**
- * A browser tab as a Nestor satellite: microphone and speaker, the device code on screen (and aloud
- * with the bundled voice, if asked), an enrollment code typed in the page, scanned with the camera
- * (if asked) or passed in the address, intents logged.
+ * A browser tab as a Nestor satellite: it writes with the assistant, and talks aloud too when asked
+ * (microphone and speaker). The device code is on screen (and said with the bundled voice, if
+ * asked), an enrollment code can be typed in the page, scanned with the camera (if asked) or passed
+ * in the address; intents are logged.
  *
  * Address parameters: `?auto&room=salon&id=tab` starts at once (tests; browsers then need autoplay
- * allowed), `pairing_uri=nestor+http://…/?code=…` pairs with that enrollment code, `lang=fr` picks
- * the language, `speak` says the code aloud, `qr` scans QR codes, `core=http://…` talks to another
- * core than this page's origin.
+ * allowed), `voice` talks aloud, `pairing_uri=nestor+http://…/?code=…` pairs with that enrollment
+ * code, `lang=fr` picks the language, `speak` says the code aloud, `qr` scans QR codes,
+ * `core=http://…` talks to another core than this page's origin.
  */
 
-import {
-  AUDIO_CAPTURE,
-  AUDIO_PLAYBACK,
-  browserWebRtc,
-  IDENTIFY,
-  LocalStorageTokenStore,
-  type Logger,
-  Manifest,
-  Satellite,
-} from "@nestor-home/satellite";
+import { IDENTIFY, LocalStorageTokenStore, type Logger, Manifest, Satellite } from "@nestor-home/satellite";
 import { cameraQrScanner } from "@nestor-home/satellite/qr";
 // Served by this page, so QR codes are read offline (by default zxing-wasm fetches it from a CDN).
 import wasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
@@ -28,6 +20,8 @@ import wasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const form = $<HTMLFormElement>("form");
 const enrollForm = $<HTMLFormElement>("enroll");
+const sayForm = $<HTMLFormElement>("say");
+const chat = $<HTMLUListElement>("chat");
 const status = $<HTMLParagraphElement>("status");
 const code = $<HTMLParagraphElement>("code");
 const params = new URLSearchParams(location.search);
@@ -37,25 +31,42 @@ function log(line: string): void {
   $("log").prepend(`${new Date().toLocaleTimeString()}  ${line}\n`);
 }
 
+function bubble(text: string, from: "you" | "nestor", final = true): void {
+  const item = document.createElement("li");
+  item.className = final ? from : `${from} partial`;
+  item.textContent = text;
+  chat.append(item);
+  item.scrollIntoView({ block: "nearest" });
+}
+
 const logger: Logger = { debug: () => {}, info: log, warn: log };
 
 interface Start {
   room: string;
   id: string;
   enrollment: string | undefined;
+  voice: boolean;
   speak: boolean;
   qr: boolean;
 }
 
-function start({ room, id, enrollment, speak, qr }: Start): void {
+async function start({ room, id, enrollment, voice, speak, qr }: Start): Promise<void> {
   form.hidden = true;
   status.textContent = "Connecting…";
   const locale = params.get("lang") ?? navigator.languages;
+  // The voice (WebRTC, the microphone) is only loaded when the tab talks aloud.
+  const aloud = voice ? (await import("@nestor-home/satellite/voice")).browserVoice({ logger }) : undefined;
   const satellite = new Satellite({
     core: params.get("core") ?? location.origin,
-    manifest: new Manifest({ id, model: "browser", room }, [AUDIO_CAPTURE, AUDIO_PLAYBACK, IDENTIFY]),
+    manifest: new Manifest({ id, model: "browser", room }, [IDENTIFY]),
     tokens: new LocalStorageTokenStore(`nestor-satellite:${id}`),
-    webrtc: browserWebRtc({ logger }),
+    // text.display and text.input: the assistant's words in the page, and what is typed in it.
+    text: {
+      input: true,
+      display: (text, final) => bubble(text, "nestor", final),
+    },
+    // audio.capture and audio.playback, when asked for. The microphone opens once Nestor allows it.
+    ...(aloud === undefined ? {} : { voice: aloud }),
     logger,
     locale,
     pairing: {
@@ -67,8 +78,8 @@ function start({ room, id, enrollment, speak, qr }: Start): void {
         enrollForm.hidden = shown === null;
         status.textContent = text;
       },
-      // device_code.speech, when asked for: the bundled voice, through Web Audio.
-      voice: speak,
+      // device_code.speech, when asked for: the bundled voice, through Web Audio (a tab that talks aloud).
+      voice: speak && aloud !== undefined,
       accepts: ["enrollment.input"],
       // enrollment.qr, when asked for: the camera reads the pairing URI's QR code while the tab waits.
       scanner: qr ? cameraQrScanner({ wasmUrl }) : undefined,
@@ -86,6 +97,7 @@ function start({ room, id, enrollment, speak, qr }: Start): void {
       connected: (up) => {
         code.hidden = true;
         enrollForm.hidden = true;
+        sayForm.hidden = !up;
         status.textContent = up ? `Connected in ${room}.` : "Reconnecting…";
         log(up ? "connected" : "disconnected");
       },
@@ -99,10 +111,29 @@ function start({ room, id, enrollment, speak, qr }: Start): void {
       if (outcome.status !== "approved") field.select();
     }, log);
   });
-  satellite.run().catch((error: unknown) => {
-    status.textContent = `Stopped: ${error instanceof Error ? error.message : String(error)}`;
-    log(status.textContent);
+  sayForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const field = sayForm.elements.namedItem("text") as HTMLInputElement;
+    const text = field.value.trim();
+    if (text === "") return;
+    try {
+      if (satellite.sendText(text)) {
+        bubble(text, "you");
+        field.value = "";
+      } else {
+        log("not connected: the message was not sent");
+      }
+    } catch (error) {
+      log(error instanceof Error ? error.message : String(error)); // typed text not allowed by the household
+    }
   });
+  await satellite.run();
+}
+
+function stopped(error: unknown): void {
+  status.textContent = `Stopped: ${error instanceof Error ? error.message : String(error)}`;
+  sayForm.hidden = true;
+  log(status.textContent);
 }
 
 form.addEventListener("submit", (event) => {
@@ -113,9 +144,10 @@ form.addEventListener("submit", (event) => {
     room: String(data.get("room")),
     id: String(data.get("id")),
     enrollment: enrollment === "" ? undefined : enrollment,
+    voice: data.has("voice"),
     speak: data.has("speak"),
     qr: data.has("qr"),
-  });
+  }).catch(stopped);
 });
 
 if (params.has("auto")) {
@@ -123,7 +155,8 @@ if (params.has("auto")) {
     room: params.get("room") ?? "salon",
     id: params.get("id") ?? "navigateur",
     enrollment: params.get("pairing_uri") ?? undefined,
+    voice: params.has("voice"),
     speak: params.has("speak"),
     qr: params.has("qr"),
-  });
+  }).catch(stopped);
 }

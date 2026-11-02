@@ -1,10 +1,10 @@
 /**
  * What a satellite and the core say to each other.
  *
- * Messages on the `nestor` data channel: one JSON envelope `{type, id, at, payload}`.
+ * Messages on the link, a WebSocket: one JSON envelope `{type, id, at, payload}` per text frame.
  *
- * The satellite sends `hello` first, then `ack`s and observations; the core sends `welcome` and
- * `intent.*`. Reading is strict about the messages this SDK knows (a malformed one is a
+ * The satellite sends `hello` (its manifest and token) first, then `ack`s, observations and typed
+ * text; the core sends `welcome` and `intent.*`. Reading is strict about the messages this SDK knows (a malformed one is a
  * `ProtocolError`) and lenient about the ones it does not: an unknown type from a newer core is
  * returned as `null`, so it never breaks an older driver.
  *
@@ -23,10 +23,11 @@ import {
   ProtocolError,
 } from "./protocol.js";
 
-/** The WebRTC transport's own messages (peer left, renegotiation): not Nestor's. */
-export const SIGNALLING = "signalling";
-
 const MAX_ID = 64;
+/** `input.text`: what a person typed, 1 to 4,000 characters. */
+export const MAX_INPUT_TEXT = 4000;
+/** `intent.text`: the assistant's words, up to 16,000 characters. */
+export const MAX_SHOWN_TEXT = 16_000;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
 
 export interface Envelope<Type extends string, Payload> {
@@ -36,15 +37,21 @@ export interface Envelope<Type extends string, Payload> {
   readonly payload: Payload;
 }
 
-export type HelloMessage = Envelope<"hello", { readonly manifest: ManifestJson }>;
+export type HelloMessage = Envelope<"hello", { readonly manifest: ManifestJson; readonly token: string }>;
 export type AckMessage = Envelope<"ack", { readonly of: string }>;
 export type PersonDetectedMessage = Envelope<
   "observation.person.detected",
   { readonly count: number; readonly confidence: number }
 >;
 export type SpeechActivityMessage = Envelope<"observation.speech.activity", { readonly active: boolean }>;
+export type TextInputMessage = Envelope<"input.text", { readonly text: string }>;
 /** Everything a satellite sends. */
-export type SatelliteMessage = HelloMessage | AckMessage | PersonDetectedMessage | SpeechActivityMessage;
+export type SatelliteMessage =
+  | HelloMessage
+  | AckMessage
+  | PersonDetectedMessage
+  | SpeechActivityMessage
+  | TextInputMessage;
 
 /** A fresh message id: 32 hex characters (works outside secure contexts, unlike `randomUUID`). */
 export function newId(): string {
@@ -56,8 +63,12 @@ export function envelope<Type extends string, Payload>(type: Type, payload: Payl
   return { type, id: newId(), at: new Date().toISOString(), payload };
 }
 
-export function hello(manifest: Manifest): HelloMessage {
-  return envelope("hello", { manifest: manifest.toJSON() });
+/** The first message of a link: the manifest, and the token that proves the device was paired. */
+export function hello(manifest: Manifest, token: string): HelloMessage {
+  if (typeof token !== "string" || token.length === 0 || token.length > 128) {
+    throw new ProtocolError("a token is 1 to 128 characters");
+  }
+  return envelope("hello", { manifest: manifest.toJSON(), token });
 }
 
 export function ack(intentId: string): AckMessage {
@@ -74,6 +85,22 @@ export function personDetected(count: number, confidence: number): PersonDetecte
 export function speechActivity(active: boolean): SpeechActivityMessage {
   if (typeof active !== "boolean") throw new ProtocolError("speech activity is true or false");
   return envelope("observation.speech.activity", { active });
+}
+
+/** What a person typed on the device: a turn of its room's conversation. */
+export function textInput(text: string): TextInputMessage {
+  const length = typeof text === "string" ? characters(text) : 0;
+  if (length === 0 || length > MAX_INPUT_TEXT) {
+    throw new ProtocolError(`typed text is 1 to ${MAX_INPUT_TEXT} characters, not ${length}`);
+  }
+  return envelope("input.text", { text });
+}
+
+/** Characters as JSON Schema counts them (code points), not UTF-16 units. */
+function characters(text: string): number {
+  let count = 0;
+  for (const _ of text) count++;
+  return count;
 }
 
 /** Answer to `hello`: where the device is and what the household allowed it to do. */
@@ -105,7 +132,15 @@ export interface IdentifyIntent {
   readonly type: "intent.identify";
 }
 
-export type Intent = BehaviorIntent | ExpressionIntent | BeatIntent | IdentifyIntent;
+/** The assistant's words, to show. `final`: the last message of a turn. Needs `text.display`. */
+export interface TextIntent {
+  readonly type: "intent.text";
+  readonly text: string;
+  /** `true` when the core does not say. */
+  readonly final: boolean;
+}
+
+export type Intent = BehaviorIntent | ExpressionIntent | BeatIntent | IdentifyIntent | TextIntent;
 export type CoreMessage = Welcome | Intent;
 
 export interface Received {
@@ -152,6 +187,15 @@ function read(type: string, payload: Record<string, unknown>): CoreMessage | nul
       const expression = member(EXPRESSIONS, payload.expression, `${type}.expression`);
       const intensity = payload.intensity === undefined ? 1 : unit(payload.intensity, `${type}.intensity`);
       return { type, expression, intensity };
+    }
+    case "intent.text": {
+      exactKeys(payload, ["text", "final"], ["text"], type);
+      const { text, final } = payload;
+      if (typeof text !== "string" || characters(text) === 0 || characters(text) > MAX_SHOWN_TEXT) {
+        throw new ProtocolError(`${type}.text must be 1 to ${MAX_SHOWN_TEXT} characters`);
+      }
+      if (final !== undefined && typeof final !== "boolean") throw new ProtocolError(`${type}.final must be a boolean`);
+      return { type, text, final: final ?? true };
     }
     case "intent.beat":
     case "intent.identify":
@@ -308,13 +352,6 @@ export function parseError(data: unknown): PairingErrorBody | null {
 function record(data: unknown, where: string): Record<string, unknown> {
   if (!isRecord(data)) throw new ProtocolError(`${where}: expected a JSON object`);
   return data;
-}
-
-/** Whether a received JSON value is one of the transport's own messages, and whether it says the core left. */
-export function signalling(data: unknown): { hungUp: boolean } | null {
-  if (!isRecord(data) || data.type !== SIGNALLING) return null;
-  const message = data.message;
-  return { hungUp: isRecord(message) && message.type === "peerLeft" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

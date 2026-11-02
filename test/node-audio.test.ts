@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { Messages, SpokenCode } from "../src/index.js";
+import { Messages, quietLogger } from "../src/index.js";
 import {
   CommandSink,
   CommandSource,
   DiscardSink,
-  nodeWebRtc,
+  nodeVoice,
   RecordingSink,
   SilenceSource,
+  sinkSpeaker,
 } from "../src/node/index.js";
+import { SpokenCode } from "../src/voice/index.js";
 
 const node = JSON.stringify(process.execPath);
 
@@ -66,9 +68,8 @@ it("silence comes in 20 ms chunks at the source's rate; a recording keeps what i
 describe("the bundled voice in Node", () => {
   it("plays on the sink the core's voice plays on, at its rate, from the package's clips", async () => {
     const sink = new RecordingSink(48_000);
-    const speaker = nodeWebRtc({ sink }).speaker;
-    expect(speaker?.sampleRate).toBe(48_000);
-    if (speaker === undefined) return;
+    const speaker = sinkSpeaker(sink);
+    expect(speaker.sampleRate).toBe(48_000);
     const clock = { now: () => 0, sleep: async () => {} }; // no waiting: the test is about what is played
     const voice = new SpokenCode(speaker, new Messages("en"), { clock });
     voice.say("042137");
@@ -78,7 +79,9 @@ describe("the bundled voice in Node", () => {
   });
 
   it("is not there without a speaker, or when the core's voice is dropped", () => {
-    expect(nodeWebRtc({}).speaker).toBeUndefined();
-    expect(nodeWebRtc({ sink: new DiscardSink() }).speaker).toBeUndefined();
+    const codeVoice = (voice: ReturnType<typeof nodeVoice>) => voice.codeVoice?.(new Messages("en"), quietLogger);
+    expect(codeVoice(nodeVoice({}))).toBeUndefined();
+    expect(codeVoice(nodeVoice({ sink: new DiscardSink() }))).toBeUndefined();
+    expect(codeVoice(nodeVoice({ sink: new RecordingSink() }))).toBeDefined();
   });
 });

@@ -1,15 +1,19 @@
 /**
- * The browser's own WebRTC: `RTCPeerConnection`, the microphone through `getUserMedia`, the core's
- * voice through an `<audio>` element.
+ * The browser's own voice: `RTCPeerConnection`, the microphone through `getUserMedia`, the core's
+ * voice through an `<audio>` element, the device code said with the bundled voice through Web Audio.
  *
- * Browsers only open the microphone in a secure context (`https:` or `http://localhost`), and only
- * play sound after a user gesture: start the satellite from a click.
+ * The microphone opens only for an audio connection, once the link is welcomed with
+ * `audio.capture`: pairing and the link never wait for a person to allow it. Browsers only open it
+ * in a secure context (`https:` or `http://localhost`), and only play sound after a user gesture:
+ * start the satellite from a click.
  */
 
-import { describe, type Logger, quietLogger } from "./log.js";
-import type { Speaker } from "./voice.js";
+import type { MediaNeeds, Peer, PeerOptions, Voice } from "../audio.js";
+import type { Messages } from "../i18n.js";
+import { describe, type Logger, quietLogger } from "../log.js";
+import type { CodeVoice } from "../pairing.js";
+import { type Speaker, SpokenCode } from "./spoken.js";
 import { type AudioBridge, W3cPeer, type W3cPeerConnectionConstructor, type W3cTrack } from "./w3c.js";
-import type { MediaNeeds, Peer, PeerOptions, WebRtc } from "./webrtc.js";
 
 /** What this adapter needs of an `<audio>` element (an `HTMLAudioElement` fits). */
 export interface AudioElementLike {
@@ -17,13 +21,18 @@ export interface AudioElementLike {
   play(): Promise<void>;
 }
 
-export interface BrowserWebRtcOptions {
-  /** Constraints for `getUserMedia({audio})`; echo cancellation, noise suppression and gain control by default. */
-  readonly microphone?: Readonly<Record<string, boolean | number | string>>;
-  /** Where the core's voice plays (default: a detached `new Audio()`). */
-  readonly element?: AudioElementLike;
+export interface BrowserVoiceOptions {
+  /**
+   * Constraints for `getUserMedia({audio})`; echo cancellation, noise suppression and gain control by
+   * default. `false`: no microphone, so no `audio.capture`.
+   */
+  readonly microphone?: Readonly<Record<string, boolean | number | string>> | false;
+  /** Where the core's voice plays (default: a detached `new Audio()`). `null`: no speaker, so no `audio.playback`. */
+  readonly element?: AudioElementLike | null;
   /** Where the SDK says the device code itself (default: `webAudioSpeaker()`, `null` for none). */
   readonly speaker?: Speaker | null;
+  /** STUN/TURN URLs, only needed beyond the local network. */
+  readonly iceServers?: readonly string[];
   readonly logger?: Logger;
 }
 
@@ -38,45 +47,54 @@ interface MediaGlobals {
 
 const DEFAULT_MICROPHONE = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 
-export function browserWebRtc(options: BrowserWebRtcOptions = {}): WebRtc {
-  return new BrowserWebRtc(options);
+/** The page's microphone and speaker as the satellite's voice: `new Satellite({ voice: browserVoice(), … })`. */
+export function browserVoice(options: BrowserVoiceOptions = {}): Voice {
+  return new BrowserVoice(options);
 }
 
-class BrowserWebRtc implements WebRtc, AudioBridge {
-  readonly speaker: Speaker | undefined;
+class BrowserVoice implements Voice, AudioBridge {
+  readonly capture: boolean;
+  readonly playback: boolean;
+  private readonly speaker: Speaker | undefined;
   private readonly logger: Logger;
   private microphone: W3cTrack | null = null;
   private element: AudioElementLike | null = null;
-  private playback = false;
+  private playing = false;
 
-  constructor(private readonly options: BrowserWebRtcOptions) {
+  constructor(private readonly options: BrowserVoiceOptions) {
     this.logger = options.logger ?? quietLogger;
+    this.capture = options.microphone !== false;
+    this.playback = options.element !== null;
     this.speaker = (options.speaker === undefined ? webAudioSpeaker() : options.speaker) ?? undefined;
+  }
+
+  codeVoice(messages: Messages, logger: Logger): CodeVoice | undefined {
+    return this.playback && this.speaker !== undefined ? new SpokenCode(this.speaker, messages, { logger }) : undefined;
   }
 
   async open(needs: MediaNeeds): Promise<void> {
     const media = globals();
     if (media.RTCPeerConnection === undefined) throw new Error("this browser has no WebRTC (RTCPeerConnection)");
-    this.playback = needs.playback;
-    if (needs.playback) this.element = this.options.element ?? (media.Audio ? new media.Audio() : null);
-    if (!needs.capture) return;
+    this.playing = needs.playback && this.playback;
+    if (this.playing) this.element = this.options.element ?? (media.Audio ? new media.Audio() : null);
+    if (!needs.capture || this.options.microphone === false) return;
     const devices = media.navigator?.mediaDevices;
     if (devices === undefined) {
-      throw new Error("audio.capture is declared but this page cannot open a microphone (needs https or localhost)");
+      throw new Error("this page cannot open a microphone (it needs https or localhost)");
     }
     try {
       const stream = await devices.getUserMedia({ audio: this.options.microphone ?? DEFAULT_MICROPHONE });
       this.microphone = stream.getAudioTracks()[0] ?? null;
     } catch (error) {
-      throw new Error(`audio.capture is declared but the microphone did not open: ${describe(error)}`);
+      throw new Error(`the microphone did not open: ${describe(error)}`);
     }
-    if (this.microphone === null) throw new Error("audio.capture is declared but no microphone track came");
+    if (this.microphone === null) throw new Error("the microphone gave no audio track");
   }
 
   createPeer(options: PeerOptions): Peer {
     const Connection = globals().RTCPeerConnection;
     if (Connection === undefined) throw new Error("this browser has no WebRTC (RTCPeerConnection)");
-    return new W3cPeer(Connection, this, options, this.logger);
+    return new W3cPeer(Connection, this, { ...options, iceServers: this.options.iceServers ?? [] }, this.logger);
   }
 
   async close(): Promise<void> {
@@ -92,7 +110,7 @@ class BrowserWebRtc implements WebRtc, AudioBridge {
   incoming(event: { track: W3cTrack; streams: readonly unknown[] }, onAudio: () => void): () => void {
     onAudio();
     const element = this.element;
-    if (!this.playback || element === null) return () => {};
+    if (!this.playing || element === null) return () => {};
     const Stream = globals().MediaStream;
     element.srcObject = event.streams[0] ?? (Stream ? new Stream([event.track]) : null);
     element.play().catch((error: unknown) => {
@@ -161,8 +179,8 @@ export interface AudioContextLike {
 function voiceUrl(path: string): URL {
   const [folder, file] = path.split("/");
   return file === undefined
-    ? new URL(`../voice/${path}`, import.meta.url)
-    : new URL(`../voice/${folder}/${file}`, import.meta.url);
+    ? new URL(`../../voice/${path}`, import.meta.url)
+    : new URL(`../../voice/${folder}/${file}`, import.meta.url);
 }
 
 /**

@@ -19,7 +19,8 @@
     "noEmit": true,
     "paths": {
       "@nestor-home/satellite": ["./src/index.ts"],
-      "@nestor-home/satellite/qr": ["./src/qr/index.ts"]
+      "@nestor-home/satellite/qr": ["./src/qr/index.ts"],
+      "@nestor-home/satellite/voice": ["./src/voice/index.ts"]
     }
   },
   "include": ["src", "test", "scripts", "examples", "vitest.config.ts", "vitest.conformance.config.ts"]

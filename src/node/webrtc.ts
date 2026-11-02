@@ -1,17 +1,20 @@
 /**
- * WebRTC in Node through `@roamhq/wrtc` (libwebrtc, the browsers' own stack): the standard
- * `RTCPeerConnection`, with Opus, jitter buffer and RTCP done natively, plus its non-standard
- * `RTCAudioSource`/`RTCAudioSink` to exchange PCM with an `AudioSource`/`AudioSink`.
+ * The voice of a Node satellite: WebRTC through `@roamhq/wrtc` (libwebrtc, the browsers' own stack),
+ * the standard `RTCPeerConnection` with Opus, jitter buffer and RTCP done natively, plus its
+ * non-standard `RTCAudioSource`/`RTCAudioSink` to exchange PCM with an `AudioSource`/`AudioSink`.
  *
- * `@roamhq/wrtc` is an optional peer dependency, loaded only when a satellite opens.
+ * `@roamhq/wrtc` is an optional peer dependency, loaded only for an audio connection. The microphone
+ * (the source) opens only for one; the speaker (the sink) also says the device code while pairing.
  */
 
+import type { MediaNeeds, Peer, PeerOptions, Voice } from "../audio.js";
+import type { Messages } from "../i18n.js";
 import { describe, type Logger, quietLogger } from "../log.js";
-import { resample, type Speaker } from "../voice.js";
-import { type AudioBridge, W3cPeer, type W3cPeerConnectionConstructor, type W3cTrack } from "../w3c.js";
-import type { MediaNeeds, Peer, PeerOptions, WebRtc } from "../webrtc.js";
+import type { CodeVoice } from "../pairing.js";
+import { resample, SpokenCode } from "../voice/spoken.js";
+import { type AudioBridge, W3cPeer, type W3cPeerConnectionConstructor, type W3cTrack } from "../voice/w3c.js";
 import { type AudioSink, type AudioSource, DiscardSink, SilenceSource } from "./audio.js";
-import { sinkSpeaker } from "./voice.js";
+import { voiceFile } from "./voice.js";
 
 /** 10 ms of audio, what `RTCAudioSource.onData` takes. */
 export interface RTCAudioData {
@@ -31,23 +34,26 @@ export interface WrtcModule {
   };
 }
 
-export interface NodeWebRtcOptions {
-  /** The microphone; required when `audio.capture` is declared (`SilenceSource` for none). */
+export interface NodeVoiceOptions {
+  /** The microphone: declares `audio.capture` (`SilenceSource` for a silent one). */
   readonly source?: AudioSource;
   /**
-   * The speaker; the core's audio is dropped without one. It also says the device code with the
-   * bundled voice (unless it is a `DiscardSink`).
+   * The speaker: declares `audio.playback`. It also says the device code with the bundled voice
+   * (unless it is a `DiscardSink`).
    */
   readonly sink?: AudioSink;
   /** The WebRTC library (default: `import("@roamhq/wrtc")`). */
   readonly wrtc?: WrtcModule | (() => Promise<WrtcModule>);
+  /** STUN/TURN URLs, only needed beyond the local network. */
+  readonly iceServers?: readonly string[];
   readonly logger?: Logger;
 }
 
 const WRTC = "@roamhq/wrtc";
 
-export function nodeWebRtc(options: NodeWebRtcOptions = {}): WebRtc {
-  return new NodeWebRtc(options);
+/** This machine's audio as the satellite's voice: `new Satellite({ voice: nodeVoice({ source, sink }), … })`. */
+export function nodeVoice(options: NodeVoiceOptions = {}): Voice {
+  return new NodeVoice(options);
 }
 
 export async function loadWrtc(): Promise<WrtcModule> {
@@ -61,39 +67,53 @@ export async function loadWrtc(): Promise<WrtcModule> {
   }
 }
 
-class NodeWebRtc implements WebRtc, AudioBridge {
-  readonly speaker: Speaker | undefined;
+class NodeVoice implements Voice, AudioBridge {
+  readonly capture: boolean;
+  readonly playback: boolean;
   private readonly logger: Logger;
   private wrtc: WrtcModule | null = null;
   private source: AudioSource | null = null;
-  private sink: AudioSink | null = null;
+  private sinkStarted: Promise<void> | null = null;
+  private playing = false;
   private track: W3cTrack | null = null;
   private pumping: Promise<void> | null = null;
   private open_ = false;
 
-  constructor(private readonly options: NodeWebRtcOptions) {
+  constructor(private readonly options: NodeVoiceOptions) {
     this.logger = options.logger ?? quietLogger;
-    const { sink } = options;
-    this.speaker = sink === undefined || sink instanceof DiscardSink ? undefined : sinkSpeaker(sink);
+    this.capture = options.source !== undefined;
+    this.playback = options.sink !== undefined;
+  }
+
+  codeVoice(messages: Messages, logger: Logger): CodeVoice | undefined {
+    const { sink } = this.options;
+    if (sink === undefined || sink instanceof DiscardSink) return undefined;
+    // The clips load before anything is written: the player starts while they do.
+    const speaker = {
+      sampleRate: sink.sampleRate,
+      load: async (path: string) => {
+        await this.startSink();
+        return voiceFile(path);
+      },
+      write: (pcm: Int16Array) => sink.write(pcm),
+    };
+    return new SpokenCode(speaker, messages, { logger });
   }
 
   async open(needs: MediaNeeds): Promise<void> {
     const { wrtc = loadWrtc } = this.options;
     this.wrtc = typeof wrtc === "function" ? await wrtc() : wrtc;
-    if (needs.capture && this.options.source === undefined) {
-      throw new Error("audio.capture is declared but no audio source was given (SilenceSource for none)");
-    }
-    const source: AudioSource = needs.capture && this.options.source ? this.options.source : new SilenceSource();
-    const sink: AudioSink | null = needs.playback ? (this.options.sink ?? new DiscardSink()) : null;
+    const source: AudioSource =
+      needs.capture && this.options.source !== undefined ? this.options.source : new SilenceSource();
     await source.start?.();
+    this.playing = needs.playback && this.playback;
     try {
-      await sink?.start?.();
+      if (this.playing) await this.startSink();
     } catch (error) {
       await source.close?.();
       throw error;
     }
     this.source = source;
-    this.sink = sink;
     const rtc = new this.wrtc.nonstandard.RTCAudioSource();
     this.track = rtc.createTrack();
     this.open_ = true;
@@ -103,8 +123,13 @@ class NodeWebRtc implements WebRtc, AudioBridge {
   }
 
   createPeer(options: PeerOptions): Peer {
-    if (this.wrtc === null) throw new Error("open the WebRTC adapter before creating a peer");
-    return new W3cPeer(this.wrtc.RTCPeerConnection, this, options, this.logger);
+    if (this.wrtc === null) throw new Error("open the voice before creating a peer");
+    return new W3cPeer(
+      this.wrtc.RTCPeerConnection,
+      this,
+      { ...options, iceServers: this.options.iceServers ?? [] },
+      this.logger,
+    );
   }
 
   async close(): Promise<void> {
@@ -113,9 +138,22 @@ class NodeWebRtc implements WebRtc, AudioBridge {
     this.track = null;
     await this.source?.close?.();
     await this.pumping;
-    await this.sink?.close?.();
-    this.source = this.sink = null;
+    this.source = null;
     this.pumping = null;
+    if (this.sinkStarted !== null) {
+      this.sinkStarted = null;
+      await this.options.sink?.close?.();
+    }
+  }
+
+  private startSink(): Promise<void> {
+    const sink = this.options.sink;
+    if (sink === undefined) return Promise.resolve();
+    this.sinkStarted ??= Promise.resolve(sink.start?.()).catch((error: unknown) => {
+      this.sinkStarted = null;
+      throw error;
+    });
+    return this.sinkStarted;
   }
 
   outgoing(): W3cTrack | null {
@@ -125,7 +163,7 @@ class NodeWebRtc implements WebRtc, AudioBridge {
   incoming(event: { track: W3cTrack }, onAudio: () => void): () => void {
     if (this.wrtc === null) return () => {};
     const receiver = new this.wrtc.nonstandard.RTCAudioSink(event.track);
-    const sink = this.sink;
+    const sink = this.playing ? (this.options.sink ?? null) : null;
     receiver.ondata = (data) => {
       onAudio();
       if (sink !== null) sink.write(toMono(data, sink.sampleRate));
