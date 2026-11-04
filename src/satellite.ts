@@ -20,6 +20,9 @@
  * `audio.playback` as it can. Only once welcomed with audio allowed does the voice open the
  * microphone and offer WebRTC (`POST /satellites/{device_id}/audio`); pairing and the link never wait
  * for it, and failed audio is offered again while the link is up.
+ *
+ * An `updater` declares `device.update`: once welcomed with it allowed, the satellite says where its
+ * software stands and installs the newer version it found when a person asks (`./update.ts`).
  */
 
 import type { MediaNeeds, Peer, SessionDescription, Voice } from "./audio.js";
@@ -53,8 +56,10 @@ import {
   SPEECH_ACTIVITY,
   TEXT_DISPLAY,
   TEXT_INPUT,
+  UPDATE,
 } from "./protocol.js";
 import type { TokenStore } from "./tokens.js";
+import { SoftwareUpdates, UPDATE_CHECK_MS, type Updater } from "./update.js";
 import {
   hello,
   parseAudioAnswer,
@@ -137,6 +142,11 @@ export interface SatelliteOptions {
   readonly text?: TextSetup;
   /** Talking aloud: `browserVoice()` (`@nestor-home/satellite/voice`) or `nodeVoice()` (`/node`). */
   readonly voice?: Voice;
+  /**
+   * Finds and installs newer versions of the software the manifest names, at its own source:
+   * declares `device.update`.
+   */
+  readonly updater?: Updater;
   /** The language of what the device says to people (`fr`, `en-GB`…); by default the platform's. */
   readonly locale?: string | readonly string[];
   /** First and longest delay between attempts (link and audio). */
@@ -155,15 +165,25 @@ const PROVIDED = [
   [TEXT_DISPLAY, "a text.display callback"],
   [AUDIO_CAPTURE, "a voice with a microphone"],
   [AUDIO_PLAYBACK, "a voice with a speaker"],
+  [UPDATE, "an updater"],
 ] as const;
 
-/** The manifest with the `text.*` and `audio.*` capabilities the driver provides; one it does not is refused. */
-export function providedCapabilities(manifest: Manifest, text: TextSetup = {}, voice?: Voice): Manifest {
+/**
+ * The manifest with the `text.*`, `audio.*` and `device.update` capabilities the driver provides; one
+ * it does not is refused.
+ */
+export function providedCapabilities(
+  manifest: Manifest,
+  text: TextSetup = {},
+  voice?: Voice,
+  updater?: Updater,
+): Manifest {
   const has: Record<(typeof PROVIDED)[number][0], boolean> = {
     [TEXT_INPUT]: text.input === true,
     [TEXT_DISPLAY]: text.display !== undefined,
     [AUDIO_CAPTURE]: voice?.capture === true,
     [AUDIO_PLAYBACK]: voice?.playback === true,
+    [UPDATE]: updater !== undefined,
   };
   const added = [];
   for (const [name, needs] of PROVIDED) {
@@ -172,7 +192,7 @@ export function providedCapabilities(manifest: Manifest, text: TextSetup = {}, v
   }
   if (added.length === 0) return manifest;
   return new Manifest(manifest.device, [...manifest.capabilities, ...added], {
-    sdk: manifest.sdk,
+    software: manifest.software,
     pairingMethods: manifest.pairingMethods,
   });
 }
@@ -208,6 +228,7 @@ export class Satellite {
   private readonly http: Fetch;
   private readonly pairing: Pairing;
   private readonly backoff: readonly [number, number];
+  private readonly updates: SoftwareUpdates | null;
   /** Sends on the welcomed link; `null` while there is none. */
   private sender: ((message: SatelliteMessage) => boolean) | null = null;
   private running = false;
@@ -222,7 +243,8 @@ export class Satellite {
     this.http = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.backoff = options.backoffMs ?? [500, 30_000];
     this.messages = new Messages(options.locale);
-    const manifest = providedCapabilities(options.manifest, options.text, options.voice);
+    const manifest = providedCapabilities(options.manifest, options.text, options.voice, options.updater);
+    this.updates = options.updater ? new SoftwareUpdates(options.updater, this.messages, this.logger) : null;
     const voice = this.codeVoice(setup);
     this.manifest = manifest.withPairingMethods(pairingMethods(setup, voice !== undefined));
     const identify = this.body.identify?.bind(this.body);
@@ -423,13 +445,19 @@ export class Satellite {
     let welcomed = false;
     const audio = new AbortController();
     let audioDone: Promise<void> = Promise.resolve();
+    const checks = new AbortController();
     const socket = new Socket(linkUrl(this.core, this.manifest.device.id));
     const send = (message: SatelliteMessage) => {
       if (socket.readyState !== OPEN) return false;
       socket.send(JSON.stringify(message));
       return true;
     };
-    const dispatcher = new Dispatcher(this.body, send, this.logger, this.options.text?.display);
+    const updates = this.updates;
+    const update = (version: string) => {
+      if (updates === null || !this.welcome?.capabilities.has(UPDATE)) return;
+      void Promise.resolve().then(() => updates.install(version, send)); // after the ack
+    };
+    const dispatcher = new Dispatcher(this.body, send, this.logger, this.options.text?.display, update);
     socket.onopen = () => {
       this.connections += 1;
       send(hello(this.manifest, token));
@@ -453,6 +481,7 @@ export class Satellite {
           end(LINK_CLOSE.tokenRefused, "the audio offer's token was refused");
         });
       }
+      if (updates !== null && this.welcome?.capabilities.has(UPDATE)) this.checkUpdates(updates, send, checks.signal);
     };
     socket.onclose = (event) => end(event.code, event.reason);
     socket.onerror = () => {}; // the close that follows says why
@@ -468,10 +497,27 @@ export class Satellite {
       socket.onopen = socket.onmessage = socket.onclose = null;
       if (socket.readyState <= OPEN) socket.close(1000);
       this.sender = null;
+      checks.abort();
       audio.abort();
       await audioDone;
       if (welcomed) this.call(() => this.body.connected?.(false));
     }
+  }
+
+  /** Say where the software stands now, then once a day while the link is up (U1). */
+  private checkUpdates(
+    updates: SoftwareUpdates,
+    send: (message: SatelliteMessage) => boolean,
+    stop: AbortSignal,
+  ): void {
+    const run = async () => {
+      await updates.welcomed(send);
+      while (!stop.aborted) {
+        await sleep(UPDATE_CHECK_MS, stop);
+        await updates.report(send);
+      }
+    };
+    run().catch(() => {}); // `sleep` rejects when the link ends
   }
 
   /** What the voice opens, from what the welcome allowed; `null` for no audio at all (A1). */

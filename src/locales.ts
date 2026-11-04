@@ -35,6 +35,9 @@ link-replaced = This device connected to Nestor again from elsewhere, so this co
 audio-failed = The audio connection to Nestor failed ({ $error }). Trying again.
 text-not-sent = Not connected to Nestor, so this message was not sent.
 camera-failed = The camera did not open, so this device cannot scan a QR code ({ $error }).
+update-check-failed = Could not check for a newer version of this device's software ({ $error }).
+update-installing = Installing version { $version } of this device's software, then starting again.
+update-failed = Version { $version } of this device's software did not install ({ $error }).
 `;
 
 export const fr = `
@@ -68,6 +71,9 @@ link-replaced = Cet appareil s'est reconnecté à Nestor ailleurs : cette connex
 audio-failed = La connexion audio avec Nestor a échoué ({ $error }). Nouvel essai.
 text-not-sent = Pas de liaison avec Nestor : ce message n'est pas parti.
 camera-failed = La caméra ne s'est pas ouverte : cet appareil ne peut pas lire de QR code ({ $error }).
+update-check-failed = Impossible de chercher une nouvelle version du logiciel de cet appareil ({ $error }).
+update-installing = Installation de la version { $version } du logiciel de cet appareil, puis redémarrage.
+update-failed = La version { $version } du logiciel de cet appareil ne s'est pas installée ({ $error }).
 `;
 
 /** The messages every catalogue has. */
@@ -94,4 +100,7 @@ export type MessageId =
   | "link-replaced"
   | "audio-failed"
   | "text-not-sent"
-  | "camera-failed";
+  | "camera-failed"
+  | "update-check-failed"
+  | "update-installing"
+  | "update-failed";

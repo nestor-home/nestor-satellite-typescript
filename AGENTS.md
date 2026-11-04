@@ -29,6 +29,7 @@ src/              the core: runs anywhere, imports no platform API and no WebRTC
 ├── i18n.ts       Messages: every sentence for people, through Fluent; locales.ts holds en and fr
 ├── tokens.ts     TokenStore (token and refused codes' hashes), MemoryTokenStore, LocalStorageTokenStore
 ├── link.ts       the link's WebSocket (the platform's), its URL and close codes
+├── update.ts     Updater: what a device that updates its own software provides; reports and installs (U1-U3)
 ├── audio.ts      the Voice / Peer port: WebRTC audio, offered once welcomed with audio allowed
 ├── satellite.ts  Satellite: pairing, the link (hello/welcome, reconnection), text, observations, audio, QrScanner port
 ├── voice/        @nestor-home/satellite/voice: browserVoice (getUserMedia, an <audio> element), W3cPeer over
@@ -63,13 +64,13 @@ test/             behaviour tests against a fake core (local HTTP and WebSocket,
    in writing only (`--no-voice`), once per scenario; the enrollment scenarios set
    `NESTOR_PAIRING_URI`, which `scripts/browser-satellite.mjs` passes to the page as `?pairing_uri=`.
    A change to the link, pairing, text or audio is done when it passes. The standard it checks:
-   https://nestorhome.dev/docs/satellites/protocol/ (rules N1, P1-P8, I1-I3, L1-L5, T1-T4, A1-A4).
+   https://nestorhome.dev/docs/satellites/protocol/ (rules N1, P1-P8, I1-I3, L1-L5, T1-T4, U1-U3, A1-A4).
    See [Conformance](#conformance).
 5. **The network loop never waits for the device.** `Body` methods return at once; a failing body is
    logged, never allowed to break the link. Physical safety lives in the driver.
 6. **Capabilities are honest.** `text.*` and `audio.*` follow from what the driver provides (a
-   `text.display` callback, `text.input`, a `voice` with a microphone or a speaker); declaring one
-   without it throws. Typed text and observations need their capability declared and allowed. The
+   `text.display` callback, `text.input`, a `voice` with a microphone or a speaker, an `updater` for
+   `device.update`); declaring one without it throws. Typed text and observations need their capability declared and allowed. The
    microphone opens only for an audio connection, once welcomed with audio allowed: pairing and the
    link never wait for it, and a voice that fails is offered again while the link is up.
    `enrollment.qr` needs a `scanner` that really decodes camera frames: Node has none, so it never
