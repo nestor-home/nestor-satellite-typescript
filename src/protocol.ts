@@ -28,7 +28,8 @@ export const TEXT_INPUT = "text.input";
 export const TEXT_DISPLAY = "text.display";
 
 export const MAX_CAPABILITIES = 32;
-const MAX_SOFTWARE = 64;
+/** Characters of a software name or version. */
+export const MAX_SOFTWARE = 64;
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const CAPABILITY = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
 

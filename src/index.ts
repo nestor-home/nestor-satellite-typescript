@@ -95,6 +95,6 @@ export {
   type StorageLike,
   type TokenStore,
 } from "./tokens.js";
-export { UPDATE_CHECK_MS, UPDATE_TRIAL_MS, type Updater } from "./update.js";
+export { UPDATE_TRIAL_MS, type Updater } from "./update.js";
 export { SDK_NAME, SDK_VERSION } from "./version.js";
 export * as wire from "./wire.js";

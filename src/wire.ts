@@ -18,13 +18,13 @@ import {
   type EnrollmentMethod,
   EXPRESSIONS,
   type Expression,
+  MAX_SOFTWARE,
   type Manifest,
   type ManifestJson,
   ProtocolError,
 } from "./protocol.js";
 
 const MAX_ID = 64;
-const MAX_VERSION = 64;
 /** `input.text`: what a person typed, 1 to 4,000 characters. */
 export const MAX_INPUT_TEXT = 4000;
 /** `intent.text`: the assistant's words, up to 16,000 characters. */
@@ -116,8 +116,8 @@ export function updateStatus(state: UpdateState, version?: string): UpdateStatus
 }
 
 function softwareVersion(version: unknown, where: string): string {
-  if (typeof version !== "string" || version.length === 0 || version.length > MAX_VERSION) {
-    throw new ProtocolError(`${where} must be 1 to ${MAX_VERSION} characters`);
+  if (typeof version !== "string" || version.length === 0 || version.length > MAX_SOFTWARE) {
+    throw new ProtocolError(`${where} must be 1 to ${MAX_SOFTWARE} characters`);
   }
   return version;
 }

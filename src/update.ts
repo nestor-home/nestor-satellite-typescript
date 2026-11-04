@@ -83,7 +83,7 @@ export class SoftwareUpdates {
   async install(version: string, send: (message: SatelliteMessage) => boolean): Promise<void> {
     if (this.installing) return;
     if (this.found?.version !== version) {
-      this.logger.warn(`asked to install ${version}, which this device did not find: ignored`);
+      this.logger.warn(this.messages.format("update-not-found", { version }));
       if (this.found !== null) await this.report(send);
       return;
     }
