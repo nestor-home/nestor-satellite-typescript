@@ -17,13 +17,19 @@ export const HEAD_MOTION = "motion.head";
 export const IDENTIFY = "device.identify";
 export const PERSON_DETECTION = "vision.person_detection";
 export const SPEECH_ACTIVITY = "audio.speech_activity";
+/**
+ * The device can install a newer version of its own software, on a person's request
+ * (`update.status`, `intent.update`). Declared by giving the satellite an `Updater`.
+ */
+export const UPDATE = "device.update";
 /** The device sends what a person typed (`input.text`). */
 export const TEXT_INPUT = "text.input";
 /** The device shows the assistant's words (`intent.text`). */
 export const TEXT_DISPLAY = "text.display";
 
 export const MAX_CAPABILITIES = 32;
-const MAX_SDK = 64;
+/** Characters of a software name or version. */
+export const MAX_SOFTWARE = 64;
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const CAPABILITY = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
 
@@ -112,25 +118,30 @@ export function capability(name: string, params: Readonly<Record<string, JsonVal
   return Object.freeze({ name, params: Object.freeze({ ...params }) });
 }
 
-/** The software a device runs, as it names it. */
-export interface Sdk {
+/**
+ * The software a device runs, as its package is named where it is installed from
+ * (`@nestor-home/satellite` `0.5.0`, or the driver's own package). A device that updates itself
+ * installs newer versions of this package.
+ */
+export interface Software {
   readonly name: string;
   readonly version: string;
 }
 
-export const SDK: Sdk = Object.freeze({ name: SDK_NAME, version: SDK_VERSION });
+/** This SDK: the software a device declares unless its driver names its own. */
+export const SOFTWARE: Software = Object.freeze({ name: SDK_NAME, version: SDK_VERSION });
 
 export interface ManifestJson {
   readonly protocol: typeof PROTOCOL;
   readonly device: { readonly id: string; readonly model: string; readonly room: string; readonly brand?: string };
   readonly capabilities: readonly { readonly name: string; readonly [param: string]: JsonValue }[];
   readonly pairing_methods: readonly PairingMethod[];
-  readonly sdk?: Sdk;
+  readonly software: Software;
 }
 
 export interface ManifestOptions {
-  /** This SDK by default; `null` to say nothing. */
-  readonly sdk?: Sdk | null;
+  /** What the device runs: this SDK by default; a driver published as its own package names it. */
+  readonly software?: Software;
   /**
    * How a person can pair it (`enrollment.provisioning` by default). A `Satellite` sets them from
    * what its driver provides.
@@ -142,8 +153,7 @@ export interface ManifestOptions {
 export class Manifest {
   readonly device: Device;
   readonly capabilities: readonly Capability[];
-  /** This SDK by default; `null` to say nothing. */
-  readonly sdk: Sdk | null;
+  readonly software: Software;
   readonly pairingMethods: readonly PairingMethod[];
 
   constructor(
@@ -151,7 +161,7 @@ export class Manifest {
     capabilities: readonly (Capability | string)[] = [],
     options: ManifestOptions = {},
   ) {
-    const { sdk = SDK, pairingMethods = ["enrollment.provisioning"] } = options;
+    const { software = SOFTWARE, pairingMethods = ["enrollment.provisioning"] } = options;
     this.device = device instanceof Device ? device : new Device(device);
     this.capabilities = Object.freeze(capabilities.map((c) => (typeof c === "string" ? capability(c) : c)));
     if (this.capabilities.length > MAX_CAPABILITIES) {
@@ -160,14 +170,12 @@ export class Manifest {
     if (new Set(this.capabilities.map((c) => c.name)).size !== this.capabilities.length) {
       throw new ProtocolError("a capability is declared twice");
     }
-    if (sdk !== null) {
-      for (const value of [sdk.name, sdk.version]) {
-        if (typeof value !== "string" || value.length === 0 || value.length > MAX_SDK) {
-          throw new ProtocolError(`sdk name and version must be 1 to ${MAX_SDK} characters`);
-        }
+    for (const value of [software.name, software.version]) {
+      if (typeof value !== "string" || value.length === 0 || value.length > MAX_SOFTWARE) {
+        throw new ProtocolError(`software name and version must be 1 to ${MAX_SOFTWARE} characters`);
       }
     }
-    this.sdk = sdk;
+    this.software = Object.freeze({ name: software.name, version: software.version });
     if (pairingMethods.length === 0 || new Set(pairingMethods).size !== pairingMethods.length) {
       throw new ProtocolError("a device supports at least one pairing method, each listed once");
     }
@@ -187,7 +195,7 @@ export class Manifest {
 
   /** The same manifest with other pairing methods. */
   withPairingMethods(methods: readonly PairingMethod[]): Manifest {
-    return new Manifest(this.device, this.capabilities, { sdk: this.sdk, pairingMethods: methods });
+    return new Manifest(this.device, this.capabilities, { software: this.software, pairingMethods: methods });
   }
 
   /** The declared capability names. */
@@ -206,7 +214,7 @@ export class Manifest {
       device: brand === undefined ? { id, model, room } : { id, model, room, brand },
       capabilities: this.capabilities.map((c) => ({ name: c.name, ...c.params })),
       pairing_methods: [...this.pairingMethods],
-      ...(this.sdk === null ? {} : { sdk: { name: this.sdk.name, version: this.sdk.version } }),
+      software: { name: this.software.name, version: this.software.version },
     };
   }
 }

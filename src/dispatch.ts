@@ -1,6 +1,6 @@
 /**
- * What the satellite does with each message from the core: hand intents to the body (and the
- * assistant's words to the text display) and acknowledge them, take note of the welcome. The link
+ * What the satellite does with each message from the core: hand intents to the body (the
+ * assistant's words to the text display, an update to the updater) and acknowledge them, take note of the welcome. The link
  * reports itself up to the body once it is welcomed.
  */
 
@@ -21,6 +21,7 @@ export class Dispatcher {
     private readonly reply: (message: AckMessage) => void,
     private readonly logger: Logger = quietLogger,
     private readonly display?: TextDisplay,
+    private readonly update?: (version: string) => void,
   ) {}
 
   handle(raw: string): Outcome {
@@ -53,6 +54,9 @@ export class Dispatcher {
         break;
       case "intent.text":
         this.call(() => this.display?.(message.text, message.final));
+        break;
+      case "intent.update":
+        this.call(() => this.update?.(message.version));
         break;
     }
     this.reply(ack(received.id)); // received, whatever the body made of it

@@ -15,7 +15,7 @@ import {
 const SALON = { id: "enceinte-salon", model: "raspberry-pi-4", room: "salon" };
 
 describe("a manifest", () => {
-  it("says what the device is, what it can do and which SDK it runs", () => {
+  it("says what the device is, what it can do and which software it runs, this SDK by default", () => {
     const manifest = new Manifest({ ...SALON, brand: "raspberry" }, [
       capability(AUDIO_CAPTURE, { formats: ["opus/48000"] }),
       AUDIO_PLAYBACK,
@@ -25,14 +25,14 @@ describe("a manifest", () => {
       device: { id: "enceinte-salon", model: "raspberry-pi-4", room: "salon", brand: "raspberry" },
       capabilities: [{ name: "audio.capture", formats: ["opus/48000"] }, { name: "audio.playback" }],
       pairing_methods: ["enrollment.provisioning"],
-      sdk: { name: "@nestor-home/satellite", version: SDK_VERSION },
+      software: { name: "@nestor-home/satellite", version: SDK_VERSION },
     });
   });
 
-  it("leaves out the optional brand and, when asked, the SDK", () => {
-    const json = new Manifest(SALON, [], { sdk: null }).toJSON();
+  it("names the driver's own package when it runs as one, and leaves out the optional brand", () => {
+    const json = new Manifest(SALON, [], { software: { name: "my-satellite", version: "1.2.0" } }).toJSON();
     expect(json.device).toEqual(SALON);
-    expect("sdk" in json).toBe(false);
+    expect(json.software).toEqual({ name: "my-satellite", version: "1.2.0" });
   });
 
   it("knows the capabilities it declares", () => {
@@ -58,7 +58,7 @@ describe("a manifest", () => {
     expect(() => Manifest.of(SALON, AUDIO_CAPTURE, AUDIO_CAPTURE)).toThrow(/twice/);
     const many = Array.from({ length: 33 }, (_, i) => `family.feature_${i}`);
     expect(() => Manifest.of(SALON, ...many)).toThrow(/at most 32/);
-    expect(() => new Manifest(SALON, [], { sdk: { name: "", version: "1" } })).toThrow(/sdk/);
+    expect(() => new Manifest(SALON, [], { software: { name: "", version: "1" } })).toThrow(/software/);
   });
 });
 

@@ -59,6 +59,11 @@ terminal too, `--no-voice` for the terminal alone):
 NESTOR_PAIRING_URI='nestor+http://nestor.local:8471/?code=K7QF2M9X' npx nestor-satellite run --room salon
 ```
 
+A device that can update its own software gives an `updater` (declares `device.update`): it finds
+newer versions at the software's own source and installs them, and Nestor's admin asks it to. The
+manifest names that software (`software`, this SDK by default; a driver published as its own package
+names it).
+
 The recorded voice that says device codes is shared under CC BY 4.0: see
 [`voice/LICENSE`](voice/LICENSE).
 

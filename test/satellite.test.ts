@@ -22,6 +22,8 @@ import {
   SPEECH_ACTIVITY,
   TEXT_DISPLAY,
   TEXT_INPUT,
+  UPDATE,
+  type Updater,
 } from "../src/index.js";
 import { type AudioSession, FakeVoice } from "./support/audio.js";
 import { type CoreLink, FakeCore, message, until } from "./support/core.js";
@@ -561,6 +563,136 @@ describe("identify", () => {
     link.send(message("intent.identify", {}, "i-1"));
     expect(await link.nextOfType("ack")).toMatchObject({ payload: { of: "i-1" } });
     expect(identify).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** A device's own software source: what it finds, what it installed, whether it started again. */
+class FakeUpdater implements Updater {
+  installed: string[] = [];
+  restarts = 0;
+  kept = 0;
+  constructor(
+    public found: string | null = "0.6.0",
+    public rolledBack: string | null = null,
+    public broken = false,
+  ) {}
+  newer = async () => {
+    if (this.broken) throw new Error("registry unreachable");
+    return this.found;
+  };
+  install = async (version: string) => {
+    if (version === "9.9.9") throw new Error("disk full");
+    this.installed.push(version);
+  };
+  restart = () => {
+    this.restarts += 1;
+  };
+  welcomed = async () => {
+    this.kept += 1;
+  };
+  failed = async () => {
+    const version = this.rolledBack;
+    this.rolledBack = null;
+    return version;
+  };
+}
+
+/** The update.status messages received, until one matches. */
+async function statusUntil(link: CoreLink, state: string): Promise<{ state: string; version?: string }> {
+  for (;;) {
+    const payload = (await link.nextOfType("update.status")).payload as { state: string; version?: string };
+    if (payload.state === state) return payload;
+  }
+}
+
+describe("updates", () => {
+  it("are declared by an updater, and refused when declared without one", () => {
+    const options = { core: "http://c", tokens: new MemoryTokenStore() };
+    expect(() => new Satellite({ ...options, manifest: Manifest.of(DEVICE, UPDATE) })).toThrow(/an updater/);
+    const satellite = new Satellite({ ...options, manifest: Manifest.of(DEVICE), updater: new FakeUpdater() });
+    expect(satellite.manifest.has(UPDATE)).toBe(true);
+  });
+
+  it("say where the software stands once welcomed: the newer version found, or nothing newer", async () => {
+    const updater = new FakeUpdater();
+    const { core } = await start([], { updater });
+    const link = await greet(core, [UPDATE]);
+    expect((await link.nextOfType("update.status")).payload).toEqual({ state: "available", version: "0.6.0" });
+    expect(updater.kept).toBe(1);
+    updater.found = null;
+    link.close(1001);
+    const again = await greet(core, [UPDATE]);
+    // checked again at most once a day: the version found earlier is said again
+    expect((await again.nextOfType("update.status")).payload).toEqual({ state: "available", version: "0.6.0" });
+  });
+
+  it("install the version found once asked, after the ack, then start again on it", async () => {
+    const updater = new FakeUpdater();
+    const { core } = await start([], { updater });
+    const link = await greet(core, [UPDATE]);
+    await statusUntil(link, "available");
+    link.send(message("intent.update", { version: "0.6.0" }, "u-1"));
+    const next = [await link.received.next(), await link.received.next()];
+    expect(next.map((m) => m.type)).toEqual(["ack", "update.status"]);
+    expect(next[1]?.payload).toEqual({ state: "installing", version: "0.6.0" });
+    await until(() => updater.restarts === 1);
+    expect(updater.installed).toEqual(["0.6.0"]);
+  });
+
+  it("never install a version the device did not find, older or not", async () => {
+    const updater = new FakeUpdater();
+    const { core } = await start([], { updater });
+    const link = await greet(core, [UPDATE]);
+    await statusUntil(link, "available");
+    link.send(message("intent.update", { version: "0.0.0" }, "u-1"));
+    expect(await link.nextOfType("ack")).toMatchObject({ payload: { of: "u-1" } });
+    expect((await link.nextOfType("update.status")).payload).toEqual({ state: "available", version: "0.6.0" });
+    expect(updater.installed).toEqual([]);
+    expect(updater.restarts).toBe(0);
+  });
+
+  it("report a version that did not install, and keep running the current one", async () => {
+    const updater = new FakeUpdater("9.9.9");
+    const { core } = await start([], { updater });
+    const link = await greet(core, [UPDATE]);
+    await statusUntil(link, "available");
+    link.send(message("intent.update", { version: "9.9.9" }, "u-1"));
+    expect(await statusUntil(link, "failed")).toEqual({ state: "failed", version: "9.9.9" });
+    expect(updater.restarts).toBe(0);
+  });
+
+  it("report once a version that did not start and was rolled back", async () => {
+    const updater = new FakeUpdater("0.6.0", "0.6.0");
+    const { core } = await start([], { updater });
+    const link = await greet(core, [UPDATE]);
+    expect((await link.nextOfType("update.status")).payload).toEqual({ state: "failed", version: "0.6.0" });
+    link.close(1001);
+    const again = await greet(core, [UPDATE]);
+    expect((await again.nextOfType("update.status")).payload).toEqual({ state: "available", version: "0.6.0" });
+  });
+
+  it("say nothing when the source cannot be read", async () => {
+    const updater = new FakeUpdater("0.6.0", null, true);
+    const { core, satellite } = await start([], { updater });
+    const link = await greet(core, [UPDATE]);
+    link.send(message("intent.update", { version: "0.6.0" }, "u-1"));
+    expect(await link.nextOfType("ack")).toMatchObject({ payload: { of: "u-1" } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(link.received.pending.some((m) => m.type === "update.status")).toBe(false);
+    expect(updater.installed).toEqual([]);
+    expect(satellite.connected).toBe(true);
+  });
+
+  it("are neither checked nor installed when the household did not allow them", async () => {
+    const updater = new FakeUpdater();
+    const newer = vi.spyOn(updater, "newer");
+    const { core } = await start([], { updater });
+    const link = await greet(core, []);
+    link.send(message("intent.update", { version: "0.6.0" }, "u-1"));
+    expect(await link.nextOfType("ack")).toMatchObject({ payload: { of: "u-1" } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(newer).not.toHaveBeenCalled();
+    expect(updater.installed).toEqual([]);
   });
 });
 

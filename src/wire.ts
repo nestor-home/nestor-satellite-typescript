@@ -3,8 +3,8 @@
  *
  * Messages on the link, a WebSocket: one JSON envelope `{type, id, at, payload}` per text frame.
  *
- * The satellite sends `hello` (its manifest and token) first, then `ack`s, observations and typed
- * text; the core sends `welcome` and `intent.*`. Reading is strict about the messages this SDK knows (a malformed one is a
+ * The satellite sends `hello` (its manifest and token) first, then `ack`s, observations, typed text
+ * and `update.status`; the core sends `welcome` and `intent.*`. Reading is strict about the messages this SDK knows (a malformed one is a
  * `ProtocolError`) and lenient about the ones it does not: an unknown type from a newer core is
  * returned as `null`, so it never breaks an older driver.
  *
@@ -18,6 +18,7 @@ import {
   type EnrollmentMethod,
   EXPRESSIONS,
   type Expression,
+  MAX_SOFTWARE,
   type Manifest,
   type ManifestJson,
   ProtocolError,
@@ -45,13 +46,21 @@ export type PersonDetectedMessage = Envelope<
 >;
 export type SpeechActivityMessage = Envelope<"observation.speech.activity", { readonly active: boolean }>;
 export type TextInputMessage = Envelope<"input.text", { readonly text: string }>;
+/** Where the device's own software stands: `version` goes with every state but `current`. */
+export const UPDATE_STATES = ["current", "available", "installing", "failed"] as const;
+export type UpdateState = (typeof UPDATE_STATES)[number];
+export type UpdateStatusMessage = Envelope<
+  "update.status",
+  { readonly state: "current" } | { readonly state: Exclude<UpdateState, "current">; readonly version: string }
+>;
 /** Everything a satellite sends. */
 export type SatelliteMessage =
   | HelloMessage
   | AckMessage
   | PersonDetectedMessage
   | SpeechActivityMessage
-  | TextInputMessage;
+  | TextInputMessage
+  | UpdateStatusMessage;
 
 /** A fresh message id: 32 hex characters (works outside secure contexts, unlike `randomUUID`). */
 export function newId(): string {
@@ -94,6 +103,23 @@ export function textInput(text: string): TextInputMessage {
     throw new ProtocolError(`typed text is 1 to ${MAX_INPUT_TEXT} characters, not ${length}`);
   }
   return envelope("input.text", { text });
+}
+
+/** Where the device's software stands (`device.update`): nothing newer, or `version` found, installing or failed. */
+export function updateStatus(state: UpdateState, version?: string): UpdateStatusMessage {
+  if (state === "current") {
+    if (version !== undefined) throw new ProtocolError("update.status: no version goes with current");
+    return envelope("update.status", { state });
+  }
+  if (!UPDATE_STATES.includes(state)) throw new ProtocolError(`update.status: unknown state ${JSON.stringify(state)}`);
+  return envelope("update.status", { state, version: softwareVersion(version, `update.status.version`) });
+}
+
+function softwareVersion(version: unknown, where: string): string {
+  if (typeof version !== "string" || version.length === 0 || version.length > MAX_SOFTWARE) {
+    throw new ProtocolError(`${where} must be 1 to ${MAX_SOFTWARE} characters`);
+  }
+  return version;
 }
 
 /** Characters as JSON Schema counts them (code points), not UTF-16 units. */
@@ -140,7 +166,16 @@ export interface TextIntent {
   readonly final: boolean;
 }
 
-export type Intent = BehaviorIntent | ExpressionIntent | BeatIntent | IdentifyIntent | TextIntent;
+/**
+ * A person asks the device to install `version` of its software, and start again on it. Needs
+ * `device.update`; the device installs it only when it is the newer version it found itself.
+ */
+export interface UpdateIntent {
+  readonly type: "intent.update";
+  readonly version: string;
+}
+
+export type Intent = BehaviorIntent | ExpressionIntent | BeatIntent | IdentifyIntent | TextIntent | UpdateIntent;
 export type CoreMessage = Welcome | Intent;
 
 export interface Received {
@@ -197,6 +232,9 @@ function read(type: string, payload: Record<string, unknown>): CoreMessage | nul
       if (final !== undefined && typeof final !== "boolean") throw new ProtocolError(`${type}.final must be a boolean`);
       return { type, text, final: final ?? true };
     }
+    case "intent.update":
+      exactKeys(payload, ["version"], ["version"], type);
+      return { type, version: softwareVersion(payload.version, `${type}.version`) };
     case "intent.beat":
     case "intent.identify":
       exactKeys(payload, [], [], type);

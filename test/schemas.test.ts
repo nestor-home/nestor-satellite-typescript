@@ -57,6 +57,7 @@ it("knows every value the core may send", () => {
   const error = schemas["pairing.error.json"]?.properties as Record<string, unknown> | undefined;
   expect(error?.error).toEqual({ enum: [...wire.PAIRING_ERRORS] });
   expect(error?.reason).toEqual({ enum: [...wire.REFUSAL_REASONS] });
+  expect(field("update.status.json", "state")).toEqual({ enum: [...wire.UPDATE_STATES] });
 });
 
 it("knows every message type of the protocol", () => {
@@ -69,6 +70,7 @@ it("knows every message type of the protocol", () => {
     "intent.expression.json",
     "intent.identify.json",
     "intent.text.json",
+    "intent.update.json",
     "manifest.json",
     "observation.person.detected.json",
     "observation.speech.activity.json",
@@ -77,6 +79,7 @@ it("knows every message type of the protocol", () => {
     "pairing.request.json",
     "pairing.state.json",
     "pairing.ticket.json",
+    "update.status.json",
     "welcome.json",
   ]);
 });
@@ -85,13 +88,19 @@ describe("what the SDK sends follows the schema", () => {
   it.each([
     ["hello", wire.hello(MANIFEST, "nst1_token")],
     [
-      "hello without brand nor sdk",
-      wire.hello(new Manifest({ id: "a", model: "m", room: "r" }, [], { sdk: null }), "nst1_token"),
+      "hello without brand, a driver's own software",
+      wire.hello(
+        new Manifest({ id: "a", model: "m", room: "r" }, [], { software: { name: "my-satellite", version: "1.0.0" } }),
+        "nst1_token",
+      ),
     ],
     ["input.text", wire.textInput("Allume la lumière du salon")],
     ["ack", wire.ack("intent-1")],
     ["observation.person.detected", wire.personDetected(2, 0.75)],
     ["observation.speech.activity", wire.speechActivity(true)],
+    ["update.status current", wire.updateStatus("current")],
+    ["update.status available", wire.updateStatus("available", "0.6.0")],
+    ["update.status failed", wire.updateStatus("failed", "0.6.0")],
   ])("%s", (_name, message) => {
     validate(message, `${message.type}.json`);
   });
@@ -119,6 +128,7 @@ describe("what the schema allows the core to send, the SDK reads", () => {
     { type: "intent.identify", id: "m-6", at, payload: {} },
     { type: "intent.text", id: "m-7", at, payload: { text: "Il est midi.", final: true } },
     { type: "intent.text", id: "m-8", at, payload: { text: "Je regarde." } },
+    { type: "intent.update", id: "m-9", at, payload: { version: "0.6.0" } },
   ])("$type ($id)", (message) => {
     validate(message, `${message.type}.json`);
     expect(wire.parse(message).message?.type).toBe(message.type);

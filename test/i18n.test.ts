@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { LOCALES, Messages, negotiateLocale } from "../src/index.js";
 import { en, fr } from "../src/locales.js";
 
-const ARGS = { code: "042137", digits: "0, 4, 2, 1, 3, 7", reason: "used", seconds: 3, error: "HTTP 503" };
+const ARGS = {
+  code: "042137",
+  digits: "0, 4, 2, 1, 3, 7",
+  reason: "used",
+  seconds: 3,
+  error: "HTTP 503",
+  version: "0.6.0",
+};
 
 const catalogues = { en, fr };
 

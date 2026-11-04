@@ -67,11 +67,12 @@ export {
   PERSON_DETECTION,
   PROTOCOL,
   ProtocolError,
-  SDK,
-  type Sdk,
+  SOFTWARE,
+  type Software,
   SPEECH_ACTIVITY,
   TEXT_DISPLAY,
   TEXT_INPUT,
+  UPDATE,
 } from "./protocol.js";
 export {
   CapabilityNotAllowed,
@@ -94,5 +95,6 @@ export {
   type StorageLike,
   type TokenStore,
 } from "./tokens.js";
+export { UPDATE_TRIAL_MS, type Updater } from "./update.js";
 export { SDK_NAME, SDK_VERSION } from "./version.js";
 export * as wire from "./wire.js";
