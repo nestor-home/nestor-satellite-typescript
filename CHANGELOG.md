@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.5.0...v0.6.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* name the software in the manifest, and update it on request ([#25](https://github.com/nestor-home/nestor-satellite-typescript/issues/25))
+
+### Features
+
+* name the software in the manifest, and update it on request ([#25](https://github.com/nestor-home/nestor-satellite-typescript/issues/25)) ([7e37571](https://github.com/nestor-home/nestor-satellite-typescript/commit/7e375716f7806c661a2a3942c25c37892354c4d2))
+
 ## [0.5.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.4.0...v0.5.0) (2026-11-02)
 
 
