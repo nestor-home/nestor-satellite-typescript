@@ -6,7 +6,8 @@
  * This entry point runs anywhere (browsers, Node, workers) and needs no WebRTC: the link is the
  * platform's `WebSocket`. A satellite that talks aloud adds a voice: `browserVoice` in
  * `@nestor-home/satellite/voice`, `nodeVoice` (with the audio and token file) in
- * `@nestor-home/satellite/node`.
+ * `@nestor-home/satellite/node`. A satellite that films adds a camera: `browserCamera` in
+ * `@nestor-home/satellite/video`.
  */
 
 export type { MediaNeeds, Peer, PeerEvents, SessionDescription, Voice } from "./audio.js";
@@ -30,6 +31,7 @@ export {
   type WebSocketLike,
 } from "./link.js";
 export { type Logger, quietLogger } from "./log.js";
+export type { Camera, MediaIndicator } from "./media.js";
 export {
   type CodeVoice,
   type EnrollOutcome,
@@ -62,6 +64,7 @@ export {
   Manifest,
   type ManifestJson,
   type ManifestOptions,
+  MEDIA_INDICATOR,
   PAIRING_METHODS,
   type PairingMethod,
   PERSON_DETECTION,
@@ -73,11 +76,13 @@ export {
   TEXT_DISPLAY,
   TEXT_INPUT,
   UPDATE,
+  VIDEO_CAPTURE,
 } from "./protocol.js";
 export {
   CapabilityNotAllowed,
   LinkReplaced,
   type PairingSetup,
+  type Provided,
   pairingMethods,
   providedCapabilities,
   type QrScanner,

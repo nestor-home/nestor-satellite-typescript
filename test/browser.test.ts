@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Messages, type PeerEvents, quietLogger } from "../src/index.js";
+import { browserCamera } from "../src/video/index.js";
 import {
   type AudioElementLike,
   browserSpeech,
@@ -170,6 +171,38 @@ describe("in a browser", () => {
   it("fails clearly where there is no WebRTC", async () => {
     vi.stubGlobal("RTCPeerConnection", undefined);
     await expect(browserVoice().open({ capture: false, playback: false })).rejects.toThrow(/no WebRTC/);
+  });
+});
+
+describe("the browser's camera", () => {
+  it("films only between open and close, its video on the connection, with the voice's audio in a call", async () => {
+    const lens = new Track("video");
+    const getUserMedia = vi.fn(async (constraints: { video?: unknown; audio?: unknown }) =>
+      constraints.video ? { getVideoTracks: () => [lens] } : { getAudioTracks: () => [microphone] },
+    );
+    browser({ getUserMedia });
+    const camera = browserCamera();
+    expect(getUserMedia).not.toHaveBeenCalled();
+    await camera.open();
+    const voice = browserVoice({ element });
+    await voice.open({ capture: true, playback: true });
+    const peer = await camera.createPeer(events(), voice);
+    expect((Connection.last as Connection).tracks).toEqual([lens, microphone]);
+    await peer.close();
+    await camera.close();
+    expect(lens.stopped).toBe(true);
+    await camera.open();
+    await camera.createPeer(events(), null);
+    expect((Connection.last as Connection).tracks).toEqual([lens]); // watching carries no sound of the room
+  });
+
+  it("fails clearly when the camera cannot open", async () => {
+    browser({
+      getUserMedia: async () => {
+        throw new Error("NotAllowedError");
+      },
+    });
+    await expect(browserCamera().open()).rejects.toThrow(/camera did not open: NotAllowedError/);
   });
 });
 

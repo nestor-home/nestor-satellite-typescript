@@ -59,3 +59,34 @@ export interface Voice {
   /** Release the audio devices; called after each connection, and when the satellite stops. */
   close(): Promise<void>;
 }
+
+/**
+ * The voice of one link with the assistant, which steps aside during a call: `hold` hangs it up,
+ * `start` offers it again; after `end` (the link closed) it never starts.
+ */
+export class VoiceHold {
+  private stop: AbortController | null = null;
+  private running: Promise<void> = Promise.resolve();
+  private ended = false;
+
+  constructor(private readonly talk: ((signal: AbortSignal) => Promise<void>) | null) {}
+
+  start(): void {
+    if (this.talk === null || this.stop !== null || this.ended) return;
+    const stop = new AbortController();
+    this.stop = stop;
+    this.running = this.talk(stop.signal);
+  }
+
+  /** Hang up the voice; resolves once it has released the microphone and the speaker. */
+  async hold(): Promise<void> {
+    this.stop?.abort();
+    this.stop = null;
+    await this.running;
+  }
+
+  async end(): Promise<void> {
+    this.ended = true;
+    await this.hold();
+  }
+}

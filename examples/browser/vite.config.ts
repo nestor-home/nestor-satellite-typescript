@@ -12,6 +12,7 @@ export default defineConfig({
     alias: {
       "@nestor-home/satellite/qr": fileURLToPath(new URL("../../src/qr/index.ts", import.meta.url)),
       "@nestor-home/satellite/voice": fileURLToPath(new URL("../../src/voice/index.ts", import.meta.url)),
+      "@nestor-home/satellite/video": fileURLToPath(new URL("../../src/video/index.ts", import.meta.url)),
       "@nestor-home/satellite": fileURLToPath(new URL("../../src/index.ts", import.meta.url)),
     },
   },

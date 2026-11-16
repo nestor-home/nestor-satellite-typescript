@@ -1,7 +1,7 @@
 {
   "name": "@nestor-home/satellite",
   "version": "0.6.0",
-  "description": "TypeScript SDK to write Nestor satellites, in browsers and in Node: pairing, the WebSocket link, text, and WebRTC audio as an option.",
+  "description": "TypeScript SDK to write Nestor satellites, in browsers and in Node: pairing, the WebSocket link, text, and WebRTC audio and video as options.",
   "keywords": [
     "nestor",
     "satellite",
@@ -40,6 +40,10 @@
     "./voice": {
       "types": "./dist/voice/index.d.ts",
       "default": "./dist/voice/index.js"
+    },
+    "./video": {
+      "types": "./dist/video/index.d.ts",
+      "default": "./dist/video/index.js"
     },
     "./schemas/*": "./schemas/*",
     "./voice/*": "./voice/*",
