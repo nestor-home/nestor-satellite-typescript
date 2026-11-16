@@ -359,8 +359,7 @@ export class Satellite {
           }
           if (closed.code === LINK_CLOSE.replaced) throw new LinkReplaced(this.messages.format("link-replaced"));
           const why = `closed with ${closed.code}${closed.reason ? `: ${closed.reason}` : ""}`;
-          if (closed.code === LINK_CLOSE.insecure) this.logger.warn(this.messages.format("link-insecure"));
-          else if (closed.code === LINK_CLOSE.stopping) this.logger.info(`link ${why}, reconnecting`);
+          if (closed.code === LINK_CLOSE.stopping) this.logger.info(`link ${why}, reconnecting`);
           else this.logger.warn(this.messages.format("link-failed", { error: why }));
         } catch (error) {
           if (signal?.aborted) break;
@@ -475,7 +474,8 @@ export class Satellite {
     // Once welcomed, for a device that films or can be called: loaded then, a satellite in writing never loads it.
     let sessions: Promise<MediaSessions | null> = Promise.resolve(null);
     const checks = new AbortController();
-    const socket = new Socket(linkUrl(this.core, this.manifest.device.id));
+    const url = linkUrl(this.core, this.manifest.device.id);
+    const socket = new Socket(url);
     const send = (message: SatelliteMessage) => {
       if (socket.readyState !== OPEN) return false;
       socket.send(JSON.stringify(message));
@@ -505,6 +505,9 @@ export class Satellite {
       this.logger.info(`welcomed in ${this.welcome?.room ?? "?"}`);
       this.call(() => this.body.connected?.(true));
       const { voice, camera, onMedia } = this.options;
+      if (camera !== undefined && url.startsWith("ws:") && !this.welcome?.capabilities.has(VIDEO_CAPTURE)) {
+        this.logger.warn(this.messages.format("link-insecure")); // M7: the device does not film
+      }
       const needs = voice === undefined || !this.welcome?.voice ? null : this.audioNeeds(voice);
       if (voice !== undefined && needs !== null) {
         voiceHold = new VoiceHold((stop) =>

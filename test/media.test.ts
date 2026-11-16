@@ -276,10 +276,13 @@ describe("media sessions", () => {
     expect(running.camera.opened).toBe(0);
   });
 
-  it("say that filming needs a secure link when the core refuses an insecure one, and try again (M7)", async () => {
+  it.each([
+    ["allowed to film", EVERYTHING, false],
+    ["not allowed to film", [...CALL, MEDIA_INDICATOR], true],
+  ])("say to reach Nestor over https only when a plain link may not film (M7): %s", async (_, allowed, said) => {
     const running = await start();
-    (await running.core.links.next()).close(4403);
-    await until(() => running.warnings.some((line) => line.includes("over a secure connection")));
-    await welcomed(running, EVERYTHING);
+    await welcomed(running, allowed);
+    await pause(100);
+    expect(running.warnings.some((line) => line.includes("Reach Nestor over https"))).toBe(said);
   });
 });

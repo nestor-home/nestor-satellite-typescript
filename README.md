@@ -78,7 +78,7 @@ const satellite = new Satellite({
 });
 ```
 
-A device allowed to film links over TLS (`https://`), unless it runs on Nestor's machine.
+Nestor lets a device film only over TLS (`https://`), or on Nestor's machine.
 
 A device that can update its own software gives an `updater` (declares `device.update`): it finds
 newer versions at the software's own source and installs them, and Nestor's admin asks it to. The
