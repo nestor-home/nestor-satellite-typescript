@@ -90,7 +90,7 @@
     "vite": "8.3.8",
     "vitest": "5.1.0",
     "ws": "8.23.0",
-    "zxing-wasm": "3.1.6"
+    "zxing-wasm": "3.1.7"
   },
   "dependencies": {
     "@fluent/bundle": "0.19.1"
