@@ -32,9 +32,10 @@ export {
 } from "./spoken.js";
 export type {
   AudioBridge,
+  PeerMedia,
   W3cPeerConnection,
   W3cPeerConnectionConstructor,
   W3cTrack,
   W3cTrackEvent,
 } from "./w3c.js";
-export { W3cPeer } from "./w3c.js";
+export { audioBridge, W3cPeer } from "./w3c.js";

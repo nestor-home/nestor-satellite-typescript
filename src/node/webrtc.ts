@@ -121,7 +121,13 @@ class NodeVoice implements Voice, AudioBridge {
 
   createPeer(events: PeerEvents): Peer {
     if (this.wrtc === null) throw new Error("open the voice before creating a peer");
-    return new W3cPeer(this.wrtc.RTCPeerConnection, this, events, this.options.iceServers ?? [], this.logger);
+    return new W3cPeer(
+      this.wrtc.RTCPeerConnection,
+      { audio: this },
+      events,
+      this.options.iceServers ?? [],
+      this.logger,
+    );
   }
 
   async close(): Promise<void> {

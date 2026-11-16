@@ -1,12 +1,13 @@
 /**
  * What the satellite does with each message from the core: hand intents to the body (the
- * assistant's words to the text display, an update to the updater) and acknowledge them, take note of the welcome. The link
+ * assistant's words to the text display, an update to the updater, media sessions and pictures to
+ * the sessions) and acknowledge them, take note of the welcome. The link
  * reports itself up to the body once it is welcomed.
  */
 
 import { type Body, callBody } from "./body.js";
 import { describe, type Logger, quietLogger } from "./log.js";
-import { type AckMessage, ack, parse, type Welcome } from "./wire.js";
+import { type AckMessage, ack, type MediaIntent, parse, type Welcome } from "./wire.js";
 
 export type Outcome = "nothing" | "welcomed";
 
@@ -22,6 +23,8 @@ export class Dispatcher {
     private readonly logger: Logger = quietLogger,
     private readonly display?: TextDisplay,
     private readonly update?: (version: string) => void,
+    /** Media intents, with their id (a picture names the intent it answers); returns at once. */
+    private readonly media?: (id: string, intent: MediaIntent) => void,
   ) {}
 
   handle(raw: string): Outcome {
@@ -57,6 +60,11 @@ export class Dispatcher {
         break;
       case "intent.update":
         this.call(() => this.update?.(message.version));
+        break;
+      case "intent.media.open":
+      case "intent.media.close":
+      case "intent.media.snapshot":
+        this.call(() => this.media?.(received.id, message));
         break;
     }
     this.reply(ack(received.id)); // received, whatever the body made of it

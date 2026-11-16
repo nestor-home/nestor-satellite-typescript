@@ -1,11 +1,11 @@
 /**
  * The Nestor server's black-box conformance suite (`nestor.satellite/1`) against this SDK, through
  * the published server's `nestor satellites conformance` command: the built CLI as a speaker that
- * also writes (no body), and the browser example in a headless Chromium, talking aloud and in
- * writing only. The suite launches each once per scenario, with a fresh `{state}` folder and, for the
+ * also writes (no body), and the browser example in a headless Chromium, talking aloud, filming with
+ * Chromium's fake camera, and in writing only. The suite launches each once per scenario, with a fresh `{state}` folder and, for the
  * enrollment scenarios, `NESTOR_PAIRING_URI` in their environment. Run with `pnpm conformance`; needs
  * `uvx` and, for the browser, Playwright's Chromium. The server's version is pinned in
- * `.nestor-version`; `NESTOR_CONFORMANCE_FROM='../nestor[voice]'` runs a local checkout instead.
+ * `.nestor-version`; `NESTOR_CONFORMANCE_FROM='../nestor[voice,media]'` runs a local checkout instead.
  */
 
 import { spawn } from "node:child_process";
@@ -18,7 +18,7 @@ import { expect, it } from "vitest";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SERVER =
   process.env.NESTOR_CONFORMANCE_FROM ??
-  `nestor-home[voice]==${readFileSync(join(ROOT, ".nestor-version"), "utf8").trim()}`;
+  `nestor-home[voice,media]==${readFileSync(join(ROOT, ".nestor-version"), "utf8").trim()}`;
 
 function conformance(command: string[]): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve, reject) => {
@@ -63,6 +63,9 @@ it("the Node CLI, a speaker that also writes, without a body, is conformant", as
   expect(output).toContain("PASS  reconnects with the same token after the core closes its link (L5)");
   expect(output).toContain("PASS  forgets a refused token and pairs again (L2, P8)");
   expect(output).toContain("PASS  offers no audio when audio is not allowed (A1)");
+  expect(output).toContain("PASS  opens no media connection unless asked (M1)");
+  expect(output).toContain("PASS  sends its microphone in a call (M1)");
+  expect(output).toContain("PASS  ends the session by itself after 3 s (M2)");
   expect(output).toContain("PASS  pairs with the enrollment code of NESTOR_PAIRING_URI, no code typed (P3, P4)");
   expect(output).toContain("PASS  presents a refused enrollment code (used) only once (P5)");
   expect(output).toContain("PASS  waits for Retry-After when rate-limited (P6)");
@@ -80,7 +83,29 @@ it.skipIf(noChromium)("a headless Chromium tab that talks aloud is conformant", 
   expect(output).toContain("PASS  receives the core's audio (A1, A2)");
   expect(output).toContain("PASS  sends its microphone audio (A1, A2)");
   expect(output).toContain("PASS  offers no audio when audio is not allowed (A1)");
+  expect(output).toContain("PASS  sends its microphone in a call (M1)");
+  expect(output).toContain("PASS  ends the session when told (M2)");
   expect(output).toContain("PASS  pairs with the enrollment code of NESTOR_PAIRING_URI, no code typed (P3, P4)");
+  expect(output, output).toMatch(/^conformant: \d+ checks passed$/m);
+  expect(code, output).toBe(0);
+});
+
+it.skipIf(noChromium)("a headless Chromium tab that films and can be called is conformant", async () => {
+  const { code, output } = await conformance([
+    "node",
+    join(ROOT, "scripts/browser-satellite.mjs"),
+    "--core",
+    "{url}",
+    "--camera",
+  ]);
+  expect(output).not.toMatch(/^FAIL/m);
+  expect(output).toContain("PASS  opens no media connection unless asked (M1)");
+  expect(output).toContain("PASS  opens a media connection when asked, with what was asked (M1)");
+  expect(output).toContain("PASS  sends its camera's video in the session (M1)");
+  expect(output).toContain("PASS  sends its microphone in a call (M1)");
+  expect(output).toContain("PASS  ends the session when told (M2)");
+  expect(output).toContain("PASS  ends the session by itself after 3 s (M2)");
+  expect(output).toContain("PASS  sends a still picture when asked");
   expect(output, output).toMatch(/^conformant: \d+ checks passed$/m);
   expect(code, output).toBe(0);
 });

@@ -69,9 +69,13 @@ it("knows every message type of the protocol", () => {
     "intent.behavior.json",
     "intent.expression.json",
     "intent.identify.json",
+    "intent.media.close.json",
+    "intent.media.open.json",
+    "intent.media.snapshot.json",
     "intent.text.json",
     "intent.update.json",
     "manifest.json",
+    "media.snapshot.json",
     "observation.person.detected.json",
     "observation.speech.activity.json",
     "pairing.enrollment.json",
@@ -101,6 +105,7 @@ describe("what the SDK sends follows the schema", () => {
     ["update.status current", wire.updateStatus("current")],
     ["update.status available", wire.updateStatus("available", "0.6.0")],
     ["update.status failed", wire.updateStatus("failed", "0.6.0")],
+    ["media.snapshot", wire.mediaSnapshot("intent-1", new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]))],
   ])("%s", (_name, message) => {
     validate(message, `${message.type}.json`);
   });
@@ -129,6 +134,10 @@ describe("what the schema allows the core to send, the SDK reads", () => {
     { type: "intent.text", id: "m-7", at, payload: { text: "Il est midi.", final: true } },
     { type: "intent.text", id: "m-8", at, payload: { text: "Je regarde." } },
     { type: "intent.update", id: "m-9", at, payload: { version: "0.6.0" } },
+    { type: "welcome", id: "m-10", at, payload: { device_id: "a", room: "r", capabilities: [], voice: false } },
+    { type: "intent.media.open", id: "m-11", at, payload: { session: "s", video: true, audio: true, max_s: 3600 } },
+    { type: "intent.media.close", id: "m-12", at, payload: { session: "s" } },
+    { type: "intent.media.snapshot", id: "m-13", at, payload: {} },
   ])("$type ($id)", (message) => {
     validate(message, `${message.type}.json`);
     expect(wire.parse(message).message?.type).toBe(message.type);

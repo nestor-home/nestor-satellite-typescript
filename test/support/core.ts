@@ -2,7 +2,8 @@
  * A fake core for behaviour tests: the `nestor.satellite/1` pairing endpoints over real HTTP, the
  * link over a real WebSocket, and the audio endpoint (a local server). Links whose `hello` is
  * accepted are handed out by `links`; answered audio offers become sessions handed out by `audio`,
- * answered in-process by `FakeVoice` (`./audio.ts`).
+ * answered in-process by `FakeVoice` (`./audio.ts`). Media offers (`POST /satellites/{id}/media`) are
+ * answered for the sessions the test opened (`opened`) and handed out by `media`.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -47,8 +48,15 @@ export function message(type: string, payload: Json, id = `m-${Math.random().toS
   return { type, id, at: "2026-10-30T12:00:00.000000+00:00", payload };
 }
 
-export function welcome(deviceId: string, room: string, capabilities: string[]): Json {
-  return message("welcome", { device_id: deviceId, room, capabilities });
+export function welcome(deviceId: string, room: string, capabilities: string[], voice = true): Json {
+  return message("welcome", { device_id: deviceId, room, capabilities, voice });
+}
+
+/** A media offer the core answered: `sdp` is the device's peer, answered with `answer:<sdp>`. */
+export interface MediaOffer {
+  readonly deviceId: string;
+  readonly session: string;
+  readonly sdp: string;
 }
 
 export type Refusal = "unknown" | "expired" | "used" | "cancelled";
@@ -87,11 +95,11 @@ export class CoreLink {
     });
   }
 
-  /** Answer the hello: the room, and what the household allows. */
-  welcome(allowed: string[], room = "entree"): void {
+  /** Answer the hello: the room, what the household allows, and whether the core talks with it. */
+  welcome(allowed: string[], room = "entree", voice = true): void {
     this.allowed = new Set(allowed);
     this.welcomedAt = Date.now();
-    this.send(welcome(this.deviceId, room, allowed));
+    this.send(welcome(this.deviceId, room, allowed, voice));
   }
 
   send(message: Json): void {
@@ -137,6 +145,12 @@ export class FakeCore<S = never> {
   readonly links = new Queue<CoreLink>();
   /** Answered audio offers. */
   readonly audio = new Queue<S>();
+  /** Media sessions the core opened: an offer for one of them is answered, once. */
+  readonly opened = new Set<string>();
+  /** Answered media offers. */
+  readonly media = new Queue<MediaOffer>();
+  /** Every media offer, answered or not. */
+  readonly mediaOffers: Json[] = [];
   /** Close codes of the links turned away before a welcome (4400, 4401). */
   readonly refusedLinks: number[] = [];
   /** Bodies of `POST /satellites/pairings`, with when they came (ms). */
@@ -264,6 +278,7 @@ export class FakeCore<S = never> {
     const poll = url.pathname.match(/^\/satellites\/pairings\/([^/]+)$/);
     const enroll = url.pathname.match(/^\/satellites\/pairings\/([^/]+)\/enrollment$/);
     const offer = url.pathname.match(/^\/satellites\/([^/]+)\/audio$/);
+    const media = url.pathname.match(/^\/satellites\/([^/]+)\/media$/);
     const refuse = (error: string, extra: Json = {}, headers: Record<string, string> = {}) =>
       reply(ERRORS[error] ?? 500, { error, detail: `${error} (in English, for logs)`, ...extra }, headers);
     const limited = () => {
@@ -350,6 +365,20 @@ export class FakeCore<S = never> {
       if (session === null) return void reply(400, { detail: "unknown offer" });
       reply(200, { sdp: `answer:${String(body.sdp)}`, type: "answer", pc_id: "pc-1" });
       this.audio.push(session);
+      return;
+    }
+    if (request.method === "POST" && media?.[1]) {
+      const deviceId = decodeURIComponent(media[1]);
+      this.mediaOffers.push(body);
+      if (request.headers.authorization !== `Bearer ${this.tokens.get(deviceId)}`) {
+        return void reply(401, { detail: "pair this device first" });
+      }
+      const session = String(body.session);
+      if (!this.opened.delete(session) || !this.current.has(deviceId)) {
+        return void reply(403, { detail: "no session of this device waits for its connection" });
+      }
+      reply(200, { sdp: `answer:${String(body.sdp)}`, type: "answer" });
+      this.media.push({ deviceId, session, sdp: String(body.sdp) });
       return;
     }
     reply(404, { detail: "not found" });

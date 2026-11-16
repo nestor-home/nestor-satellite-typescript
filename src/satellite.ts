@@ -21,17 +21,25 @@
  * microphone and offer WebRTC (`POST /satellites/{device_id}/audio`); pairing and the link never wait
  * for it, and failed audio is offered again while the link is up.
  *
+ * The voice is offered only when the welcome says the core talks with the device (`voice`); without,
+ * its microphone and speaker only serve calls.
+ *
  * An `updater` declares `device.update`: once welcomed with it allowed, the satellite says where its
  * software stands and installs the newer version it found when a person asks (`./update.ts`).
+ *
+ * A `camera` declares `video.capture`, `onMedia` declares `media.indicator`: a person can watch
+ * through the camera, and call through a voice that has a microphone and a speaker, in sessions
+ * the core opens on the link (`./media.ts`, rules M1 to M6).
  */
 
-import type { MediaNeeds, Peer, SessionDescription, Voice } from "./audio.js";
+import { type MediaNeeds, type Peer, type SessionDescription, type Voice, VoiceHold } from "./audio.js";
 import { type Body, callBody } from "./body.js";
 import { readEnrollment } from "./codes.js";
 import { Dispatcher, type TextDisplay } from "./dispatch.js";
 import { Messages } from "./i18n.js";
 import { LINK_CLOSE, linkUrl, OPEN, platformWebSocket, type WebSocketConstructor } from "./link.js";
 import { describe, type Logger, quietLogger } from "./log.js";
+import type { Camera, MediaIndicator, MediaSessions } from "./media.js";
 import {
   type CodeVoice,
   type EnrollOutcome,
@@ -49,6 +57,7 @@ import {
   type EnrollmentMethod,
   IDENTIFY,
   Manifest,
+  MEDIA_INDICATOR,
   PAIRING_METHODS,
   type PairingMethod,
   PERSON_DETECTION,
@@ -57,12 +66,14 @@ import {
   TEXT_DISPLAY,
   TEXT_INPUT,
   UPDATE,
+  VIDEO_CAPTURE,
 } from "./protocol.js";
 import type { TokenStore } from "./tokens.js";
 import { SoftwareUpdates, UPDATE_CHECK_MS, type Updater } from "./update.js";
 import {
   hello,
-  parseAudioAnswer,
+  type MediaIntent,
+  parseAnswer,
   personDetected,
   type SatelliteMessage,
   speechActivity,
@@ -131,8 +142,8 @@ export interface SatelliteOptions {
   /** The core's device server, e.g. `http://nestor.local:8471`. */
   readonly core: string;
   /**
-   * What the device is and can do. Its `pairing_methods` are set from `pairing`, its `text.*` and
-   * `audio.*` capabilities from `text` and `voice`.
+   * What the device is and can do. Its `pairing_methods` are set from `pairing`, its `text.*`,
+   * `audio.*`, `video.capture` and `media.indicator` capabilities from what is given.
    */
   readonly manifest: Manifest;
   readonly tokens: TokenStore;
@@ -140,8 +151,21 @@ export interface SatelliteOptions {
   readonly pairing?: PairingSetup;
   /** Writing: the assistant's words shown, text typed. */
   readonly text?: TextSetup;
-  /** Talking aloud: `browserVoice()` (`@nestor-home/satellite/voice`) or `nodeVoice()` (`/node`). */
+  /**
+   * Talking aloud: `browserVoice()` (`@nestor-home/satellite/voice`) or `nodeVoice()` (`/node`).
+   * With a microphone and a speaker, people can also call through the device.
+   */
   readonly voice?: Voice;
+  /**
+   * Films in the sessions a person opens, and takes still pictures: `browserCamera()`
+   * (`@nestor-home/satellite/video`). Declares `video.capture`.
+   */
+  readonly camera?: Camera;
+  /**
+   * Shows that something is filmed or heard (a light, a screen): `true` before a session is offered,
+   * `false` once nothing is. Returns at once. Declares `media.indicator`.
+   */
+  readonly onMedia?: MediaIndicator;
   /**
    * Finds and installs newer versions of the software the manifest names, at its own source:
    * declares `device.update`.
@@ -166,24 +190,27 @@ const PROVIDED = [
   [AUDIO_CAPTURE, "a voice with a microphone"],
   [AUDIO_PLAYBACK, "a voice with a speaker"],
   [UPDATE, "an updater"],
+  [VIDEO_CAPTURE, "a camera"],
+  [MEDIA_INDICATOR, "an onMedia callback"],
 ] as const;
 
+/** What a driver gives a satellite, from which its capabilities follow. */
+export type Provided = Pick<SatelliteOptions, "text" | "voice" | "updater" | "camera" | "onMedia">;
+
 /**
- * The manifest with the `text.*`, `audio.*` and `device.update` capabilities the driver provides; one
- * it does not is refused.
+ * The manifest with the `text.*`, `audio.*`, `device.update`, `video.capture` and `media.indicator`
+ * capabilities the driver provides; one it does not is refused.
  */
-export function providedCapabilities(
-  manifest: Manifest,
-  text: TextSetup = {},
-  voice?: Voice,
-  updater?: Updater,
-): Manifest {
+export function providedCapabilities(manifest: Manifest, given: Provided = {}): Manifest {
+  const { text = {}, voice } = given;
   const has: Record<(typeof PROVIDED)[number][0], boolean> = {
     [TEXT_INPUT]: text.input === true,
     [TEXT_DISPLAY]: text.display !== undefined,
     [AUDIO_CAPTURE]: voice?.capture === true,
     [AUDIO_PLAYBACK]: voice?.playback === true,
-    [UPDATE]: updater !== undefined,
+    [UPDATE]: given.updater !== undefined,
+    [VIDEO_CAPTURE]: given.camera !== undefined,
+    [MEDIA_INDICATOR]: given.onMedia !== undefined,
   };
   const added = [];
   for (const [name, needs] of PROVIDED) {
@@ -243,7 +270,7 @@ export class Satellite {
     this.http = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.backoff = options.backoffMs ?? [500, 30_000];
     this.messages = new Messages(options.locale);
-    const manifest = providedCapabilities(options.manifest, options.text, options.voice, options.updater);
+    const manifest = providedCapabilities(options.manifest, options);
     this.updates = options.updater ? new SoftwareUpdates(options.updater, this.messages, this.logger) : null;
     const voice = this.codeVoice(setup);
     this.manifest = manifest.withPairingMethods(pairingMethods(setup, voice !== undefined));
@@ -332,7 +359,8 @@ export class Satellite {
           }
           if (closed.code === LINK_CLOSE.replaced) throw new LinkReplaced(this.messages.format("link-replaced"));
           const why = `closed with ${closed.code}${closed.reason ? `: ${closed.reason}` : ""}`;
-          if (closed.code === LINK_CLOSE.stopping) this.logger.info(`link ${why}, reconnecting`);
+          if (closed.code === LINK_CLOSE.insecure) this.logger.warn(this.messages.format("link-insecure"));
+          else if (closed.code === LINK_CLOSE.stopping) this.logger.info(`link ${why}, reconnecting`);
           else this.logger.warn(this.messages.format("link-failed", { error: why }));
         } catch (error) {
           if (signal?.aborted) break;
@@ -443,8 +471,9 @@ export class Satellite {
       end = (code, reason) => resolve({ code, reason });
     });
     let welcomed = false;
-    const audio = new AbortController();
-    let audioDone: Promise<void> = Promise.resolve();
+    let voiceHold = new VoiceHold(null);
+    // Once welcomed, for a device that films or can be called: loaded then, a satellite in writing never loads it.
+    let sessions: Promise<MediaSessions | null> = Promise.resolve(null);
     const checks = new AbortController();
     const socket = new Socket(linkUrl(this.core, this.manifest.device.id));
     const send = (message: SatelliteMessage) => {
@@ -457,7 +486,8 @@ export class Satellite {
       if (updates === null || !this.welcome?.capabilities.has(UPDATE)) return;
       void Promise.resolve().then(() => updates.install(version, send)); // after the ack
     };
-    const dispatcher = new Dispatcher(this.body, send, this.logger, this.options.text?.display, update);
+    const media = (id: string, intent: MediaIntent) => void sessions.then((live) => live?.handle(id, intent));
+    const dispatcher = new Dispatcher(this.body, send, this.logger, this.options.text?.display, update, media);
     socket.onopen = () => {
       this.connections += 1;
       send(hello(this.manifest, token));
@@ -474,12 +504,37 @@ export class Satellite {
       this.sender = send;
       this.logger.info(`welcomed in ${this.welcome?.room ?? "?"}`);
       this.call(() => this.body.connected?.(true));
-      const { voice } = this.options;
-      const needs = voice === undefined ? null : this.audioNeeds(voice);
+      const { voice, camera, onMedia } = this.options;
+      const needs = voice === undefined || !this.welcome?.voice ? null : this.audioNeeds(voice);
       if (voice !== undefined && needs !== null) {
-        audioDone = this.audio(voice, token, needs, audio.signal, () => {
-          end(LINK_CLOSE.tokenRefused, "the audio offer's token was refused");
-        });
+        voiceHold = new VoiceHold((stop) =>
+          this.audio(voice, token, needs, stop, () => {
+            end(LINK_CLOSE.tokenRefused, "the audio offer's token was refused");
+          }),
+        );
+        voiceHold.start();
+      }
+      if (camera !== undefined || voice !== undefined) {
+        const allowed = this.welcome?.capabilities ?? new Set<string>();
+        const hold = voiceHold;
+        sessions = import("./media.js").then(
+          ({ MediaSessions }) =>
+            new MediaSessions({
+              allowed,
+              camera,
+              voice,
+              offer: (session, offer, stop) => this.offerMedia(session, offer, token, stop),
+              send,
+              voiceHold: hold,
+              onMedia,
+              messages: this.messages,
+              logger: this.logger,
+            }),
+          (error: unknown) => {
+            this.logger.warn(this.messages.format("media-failed", { error: describe(error) }));
+            return null;
+          },
+        );
       }
       if (updates !== null && this.welcome?.capabilities.has(UPDATE)) this.checkUpdates(updates, send, checks.signal);
     };
@@ -498,8 +553,8 @@ export class Satellite {
       if (socket.readyState <= OPEN) socket.close(1000);
       this.sender = null;
       checks.abort();
-      audio.abort();
-      await audioDone;
+      await voiceHold.end();
+      await (await sessions)?.close();
       if (welcomed) this.call(() => this.body.connected?.(false));
     }
   }
@@ -592,7 +647,24 @@ export class Satellite {
     });
     if (response.status === 401) throw new Refused("token refused");
     if (!response.ok) throw new HttpError(response.status, `audio offer: HTTP ${response.status}`);
-    return parseAudioAnswer(await response.json());
+    return parseAnswer(await response.json());
+  }
+
+  /** Connect for a session the core asked for (M1): its answer, or an error when it no longer waits for it. */
+  private async offerMedia(
+    session: string,
+    offer: SessionDescription,
+    token: string,
+    signal: AbortSignal,
+  ): Promise<SessionDescription> {
+    const response = await this.http(`${this.core}/satellites/${encodeURIComponent(this.manifest.device.id)}/media`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ session, sdp: offer.sdp, type: offer.type }),
+      signal,
+    });
+    if (!response.ok) throw new HttpError(response.status, `media offer: HTTP ${response.status}`);
+    return parseAnswer(await response.json(), "media answer");
   }
 
   private call(action: () => void): void {

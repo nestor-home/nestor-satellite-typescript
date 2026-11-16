@@ -28,6 +28,8 @@ export const LINK_CLOSE = {
   offContract: 4400,
   /** The token is refused: forget it and pair again. */
   tokenRefused: 4401,
+  /** A device allowed to film links over TLS only (`wss`), unless on the core's machine: reach it over https. */
+  insecure: 4403,
   /** A newer link of this device replaced this one: stop. */
   replaced: 4409,
 } as const;

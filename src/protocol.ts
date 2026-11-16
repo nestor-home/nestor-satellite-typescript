@@ -26,6 +26,10 @@ export const UPDATE = "device.update";
 export const TEXT_INPUT = "text.input";
 /** The device shows the assistant's words (`intent.text`). */
 export const TEXT_DISPLAY = "text.display";
+/** The device films, only in a session a person opened (`intent.media.open`). Declared by giving it a `camera`. */
+export const VIDEO_CAPTURE = "video.capture";
+/** The device shows that a session is open (a light, a screen). Declared by giving it `onMedia`. */
+export const MEDIA_INDICATOR = "media.indicator";
 
 export const MAX_CAPABILITIES = 32;
 /** Characters of a software name or version. */
