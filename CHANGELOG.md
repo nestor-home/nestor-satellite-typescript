@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.6.0...v0.7.0) (2026-11-16)
+
+
+### Features
+
+* film and take calls in sessions the core opens ([#53](https://github.com/nestor-home/nestor-satellite-typescript/issues/53)) ([248afce](https://github.com/nestor-home/nestor-satellite-typescript/commit/248afce15085f088fec9c7392f080ae3821b8135))
+
 ## [0.6.0](https://github.com/nestor-home/nestor-satellite-typescript/compare/v0.5.0...v0.6.0) (2026-11-04)
 
 
