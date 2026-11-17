@@ -27,7 +27,7 @@ jobs:
   conformance:
     # The published server's black-box suite (`nestor satellites conformance`, version in
     # .nestor-version) against the built CLI and a headless Chromium tab, as subprocesses. One job
-    # per satellite, side by side; the core (uv) and Chromium come from the cache once warm.
+    # per satellite, side by side; Chromium comes from the cache once warm.
     name: conformance (${{ matrix.satellite }})
     runs-on: ubuntu-latest
     strategy:
@@ -36,9 +36,10 @@ jobs:
         satellite: [cli, browser-voice, browser-camera, browser-text]
     steps:
       - uses: actions/checkout@v7
+      # uvx installs the core in seconds; restoring and saving its cache cost more than they saved.
       - uses: astral-sh/setup-uv@v10.3.3
         with:
-          cache-dependency-glob: .nestor-version
+          enable-cache: false
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
