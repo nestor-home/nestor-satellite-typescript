@@ -96,7 +96,7 @@ class BrowserVoice implements Voice, AudioBridge {
 
   createPeer(events: PeerEvents): Peer {
     if (this.connection === null) throw new Error("open the voice before creating a peer");
-    return new W3cPeer(this.connection, this, events, this.options.iceServers ?? [], this.logger);
+    return new W3cPeer(this.connection, { audio: this }, events, this.options.iceServers ?? [], this.logger);
   }
 
   async close(): Promise<void> {

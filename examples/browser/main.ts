@@ -8,8 +8,9 @@
  *
  * Address parameters: `?auto&room=salon&id=tab` starts at once (tests; browsers then need autoplay
  * allowed), `voice` talks aloud, `pairing_uri=nestor+http://…/?code=…` pairs with that enrollment
- * code, `lang=fr` picks the language, `speak` says the code aloud, `qr` scans QR codes,
- * `core=http://…` talks to another core than this page's origin.
+ * code, `lang=fr` picks the language, `speak` says the code aloud, `qr` scans QR codes, `camera`
+ * lets people watch through the camera (`camera=pattern`: a test pattern instead), `core=http://…`
+ * talks to another core than this page's origin. A tab that talks aloud can also be called.
  */
 
 import { IDENTIFY, LocalStorageTokenStore, type Logger, Manifest, Satellite } from "@nestor-home/satellite";
@@ -48,14 +49,18 @@ interface Start {
   voice: boolean;
   speak: boolean;
   qr: boolean;
+  camera: string | null;
 }
 
-async function start({ room, id, enrollment, voice, speak, qr }: Start): Promise<void> {
+async function start({ room, id, enrollment, voice, speak, qr, camera }: Start): Promise<void> {
   form.hidden = true;
   status.textContent = "Connecting…";
   const locale = params.get("lang") ?? navigator.languages;
   // The voice (WebRTC, the microphone) is only loaded when the tab talks aloud.
   const aloud = voice ? (await import("@nestor-home/satellite/voice")).browserVoice({ logger }) : undefined;
+  // The camera (video.capture) too: filmed only in a session a person opens in Nestor.
+  const video = camera === null ? undefined : await import("@nestor-home/satellite/video");
+  const lens = camera === "pattern" ? video?.patternCamera({ logger }) : video?.browserCamera({ logger });
   const satellite = new Satellite({
     core: params.get("core") ?? location.origin,
     manifest: new Manifest({ id, model: "browser", room }, [IDENTIFY]),
@@ -67,6 +72,12 @@ async function start({ room, id, enrollment, voice, speak, qr }: Start): Promise
     },
     // audio.capture and audio.playback, when asked for. The microphone opens once Nestor allows it.
     ...(aloud === undefined ? {} : { voice: aloud }),
+    ...(lens === undefined ? {} : { camera: lens }),
+    // media.indicator: the page says when someone watches or calls through it.
+    onMedia: (active) => {
+      $("live").hidden = !active;
+      log(active ? "media session open" : "media session closed");
+    },
     logger,
     locale,
     pairing: {
@@ -147,6 +158,7 @@ form.addEventListener("submit", (event) => {
     voice: data.has("voice"),
     speak: data.has("speak"),
     qr: data.has("qr"),
+    camera: data.has("camera") ? "" : null,
   }).catch(stopped);
 });
 
@@ -158,5 +170,6 @@ if (params.has("auto")) {
     voice: params.has("voice"),
     speak: params.has("speak"),
     qr: params.has("qr"),
+    camera: params.get("camera"),
   }).catch(stopped);
 }

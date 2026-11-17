@@ -3,8 +3,9 @@
 TypeScript SDK to write **satellites** for [Nestor](https://nestorhome.dev), in browsers and in
 Node: devices (a tab on a wall tablet, a Raspberry Pi speaker, a robot) that pair with a Nestor
 server, hold one WebSocket link to it, talk with the assistant in writing, aloud or both, carry out
-its intents and report what they observe, following the `nestor.satellite/1` protocol. It does not
-depend on the Nestor server.
+its intents and report what they observe, following the `nestor.satellite/1` protocol. A device
+with a camera can be watched, and one with a microphone and a speaker called, in sessions a person
+opens in Nestor. It does not depend on the Nestor server.
 
 **Documentation:** [nestorhome.dev/docs/sdks/typescript](https://nestorhome.dev/docs/sdks/typescript/)
 (Node, pairing options, QR codes, the command, conformance).
@@ -58,6 +59,26 @@ terminal too, `--no-voice` for the terminal alone):
 ```bash
 NESTOR_PAIRING_URI='nestor+http://nestor.local:8471/?code=K7QF2M9X' npx nestor-satellite run --room salon
 ```
+
+A camera (`@nestor-home/satellite/video`, declares `video.capture`) films only in a session a person
+opens in Nestor, and a voice with a microphone and a speaker also takes calls. The SDK keeps the
+rules itself: it connects only when its link asks, for what it was allowed, ends the session when
+told, at its time limit or when the link drops, hangs up the assistant's voice during a call, and
+never listens on a port. `onMedia` shows when something is filmed or heard (declares
+`media.indicator`):
+
+```ts
+import { browserCamera } from "@nestor-home/satellite/video"; // or patternCamera() to try
+
+const satellite = new Satellite({
+  ...options,
+  voice: browserVoice(),
+  camera: browserCamera(),
+  onMedia: (active) => (light.hidden = !active),
+});
+```
+
+Nestor lets a device film only over TLS (`https://`), or on Nestor's machine.
 
 A device that can update its own software gives an `updater` (declares `device.update`): it finds
 newer versions at the software's own source and installs them, and Nestor's admin asks it to. The

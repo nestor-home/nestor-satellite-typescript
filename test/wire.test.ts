@@ -33,6 +33,16 @@ describe("what a satellite sends", () => {
     expect(wire.textInput("🙂".repeat(4000)).payload.text).toHaveLength(8000); // 4,000 characters, 8,000 UTF-16 units
   });
 
+  it("sends a still picture whole in base64, and refuses one the core would not take", () => {
+    const picture = Uint8Array.from({ length: 100_001 }, (_, i) => (i * 7) % 256);
+    expect(wire.mediaSnapshot("intent-1", picture).payload).toEqual({
+      of: "intent-1",
+      jpeg: Buffer.from(picture).toString("base64"),
+    });
+    expect(() => wire.mediaSnapshot("intent-1", new Uint8Array())).toThrow(ProtocolError);
+    expect(() => wire.mediaSnapshot("intent-1", new Uint8Array(3_000_001))).toThrow(ProtocolError);
+  });
+
   it("refuses observations that the core would reject", () => {
     expect(() => wire.personDetected(-1, 0.5)).toThrow(ProtocolError);
     expect(() => wire.personDetected(1.5, 0.5)).toThrow(ProtocolError);
@@ -46,8 +56,11 @@ describe("reading the core", () => {
   it("reads a welcome and each intent", () => {
     expect(wire.parse(of("welcome", { device_id: "a", room: "salon", capabilities: ["audio.capture"] }))).toEqual({
       id: "m-1",
-      message: { type: "welcome", deviceId: "a", room: "salon", capabilities: new Set(["audio.capture"]) },
+      message: { type: "welcome", deviceId: "a", room: "salon", capabilities: new Set(["audio.capture"]), voice: true },
     });
+    expect(
+      wire.parse(of("welcome", { device_id: "a", room: "r", capabilities: [], voice: false })).message,
+    ).toMatchObject({ voice: false });
     expect(wire.parse(of("intent.behavior", { behavior: "thinking" })).message).toEqual({
       type: "intent.behavior",
       behavior: "thinking",
@@ -64,6 +77,14 @@ describe("reading the core", () => {
       text: "Je regarde.",
       final: false,
     });
+    expect(
+      wire.parse(of("intent.media.open", { session: "s-1", video: true, audio: false, max_s: 60 })).message,
+    ).toEqual({ type: "intent.media.open", session: "s-1", video: true, audio: false, maxS: 60 });
+    expect(wire.parse(of("intent.media.close", { session: "s-1" })).message).toEqual({
+      type: "intent.media.close",
+      session: "s-1",
+    });
+    expect(wire.parse(of("intent.media.snapshot", {})).message).toEqual({ type: "intent.media.snapshot" });
   });
 
   it("takes the assistant's words as the last of their turn when the core does not say", () => {
@@ -97,6 +118,16 @@ describe("reading the core", () => {
     ["empty text", of("intent.text", { text: "" })],
     ["text too long", of("intent.text", { text: "a".repeat(16_001) })],
     ["a final that is not a boolean", of("intent.text", { text: "ok", final: "yes" })],
+    ["a voice that is not a boolean", of("welcome", { device_id: "a", room: "r", capabilities: [], voice: 1 })],
+    ["a session without max_s", of("intent.media.open", { session: "s", video: true, audio: false })],
+    [
+      "a session longer than an hour",
+      of("intent.media.open", { session: "s", video: true, audio: false, max_s: 3601 }),
+    ],
+    ["a session of no seconds", of("intent.media.open", { session: "s", video: true, audio: false, max_s: 0 })],
+    ["video that is not a boolean", of("intent.media.open", { session: "s", video: 1, audio: false, max_s: 9 })],
+    ["an empty session", of("intent.media.close", { session: "" })],
+    ["a snapshot with a payload", of("intent.media.snapshot", { size: 2 })],
   ])("refuses a known message with %s", (_case, data) => {
     expect(() => wire.parse(data)).toThrow(ProtocolError);
   });

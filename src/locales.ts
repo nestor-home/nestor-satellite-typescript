@@ -33,6 +33,10 @@ token-refused = Nestor no longer knows this device. Pairing it again.
 link-failed = The link to Nestor failed ({ $error }). Trying again.
 link-replaced = This device connected to Nestor again from elsewhere, so this connection stops.
 audio-failed = The audio connection to Nestor failed ({ $error }). Trying again.
+link-insecure = Nestor does not let this device film over a plain connection. Reach Nestor over https.
+media-refused = Nestor asked for a camera or a call this device was not allowed or cannot give: refused.
+media-failed = A session with Nestor failed ({ $error }).
+media-timed-out = The session reached its { $seconds } s limit and ended.
 text-not-sent = Not connected to Nestor, so this message was not sent.
 camera-failed = The camera did not open, so this device cannot scan a QR code ({ $error }).
 update-check-failed = Could not check for a newer version of this device's software ({ $error }).
@@ -70,6 +74,10 @@ token-refused = Nestor ne connaît plus cet appareil. Nouvel appairage.
 link-failed = La liaison avec Nestor a échoué ({ $error }). Nouvel essai.
 link-replaced = Cet appareil s'est reconnecté à Nestor ailleurs : cette connexion s'arrête.
 audio-failed = La connexion audio avec Nestor a échoué ({ $error }). Nouvel essai.
+link-insecure = Nestor ne laisse pas cet appareil filmer sur une connexion non chiffrée. Joignez Nestor en https.
+media-refused = Nestor a demandé une caméra ou un appel que cet appareil n'a pas le droit ou pas les moyens de donner : refusé.
+media-failed = Une session avec Nestor a échoué ({ $error }).
+media-timed-out = La session a atteint sa limite de { $seconds } s et s'est terminée.
 text-not-sent = Pas de liaison avec Nestor : ce message n'est pas parti.
 camera-failed = La caméra ne s'est pas ouverte : cet appareil ne peut pas lire de QR code ({ $error }).
 update-check-failed = Impossible de chercher une nouvelle version du logiciel de cet appareil ({ $error }).
@@ -101,6 +109,10 @@ export type MessageId =
   | "link-failed"
   | "link-replaced"
   | "audio-failed"
+  | "link-insecure"
+  | "media-refused"
+  | "media-failed"
+  | "media-timed-out"
   | "text-not-sent"
   | "camera-failed"
   | "update-check-failed"

@@ -3,13 +3,14 @@
  *
  * Messages on the link, a WebSocket: one JSON envelope `{type, id, at, payload}` per text frame.
  *
- * The satellite sends `hello` (its manifest and token) first, then `ack`s, observations, typed text
- * and `update.status`; the core sends `welcome` and `intent.*`. Reading is strict about the messages this SDK knows (a malformed one is a
+ * The satellite sends `hello` (its manifest and token) first, then `ack`s, observations, typed text,
+ * `update.status` and `media.snapshot`; the core sends `welcome` and `intent.*` (`intent.media.*`
+ * included). Reading is strict about the messages this SDK knows (a malformed one is a
  * `ProtocolError`) and lenient about the ones it does not: an unknown type from a newer core is
  * returned as `null`, so it never breaks an older driver.
  *
  * Bodies of the pairing endpoints (`pairing.*` schemas): requests and proofs the satellite sends,
- * tickets, states and errors it reads. And the core's answer to an audio offer.
+ * tickets, states and errors it reads. And the core's answer to an audio or a media offer.
  */
 
 import {
@@ -29,6 +30,10 @@ const MAX_ID = 64;
 export const MAX_INPUT_TEXT = 4000;
 /** `intent.text`: the assistant's words, up to 16,000 characters. */
 export const MAX_SHOWN_TEXT = 16_000;
+/** `media.snapshot`: a still picture, at most 4,000,000 characters of base64 (about 3 MB of JPEG). */
+export const MAX_SNAPSHOT = 4_000_000;
+/** `intent.media.open`: a session lasts 1 to 3,600 s at most. */
+export const MAX_SESSION_S = 3600;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
 
 export interface Envelope<Type extends string, Payload> {
@@ -53,6 +58,8 @@ export type UpdateStatusMessage = Envelope<
   "update.status",
   { readonly state: "current" } | { readonly state: Exclude<UpdateState, "current">; readonly version: string }
 >;
+/** The still picture asked by the intent `of`: a JPEG, in base64. */
+export type MediaSnapshotMessage = Envelope<"media.snapshot", { readonly of: string; readonly jpeg: string }>;
 /** Everything a satellite sends. */
 export type SatelliteMessage =
   | HelloMessage
@@ -60,7 +67,8 @@ export type SatelliteMessage =
   | PersonDetectedMessage
   | SpeechActivityMessage
   | TextInputMessage
-  | UpdateStatusMessage;
+  | UpdateStatusMessage
+  | MediaSnapshotMessage;
 
 /** A fresh message id: 32 hex characters (works outside secure contexts, unlike `randomUUID`). */
 export function newId(): string {
@@ -115,6 +123,17 @@ export function updateStatus(state: UpdateState, version?: string): UpdateStatus
   return envelope("update.status", { state, version: softwareVersion(version, `update.status.version`) });
 }
 
+/** The still picture asked by the intent `of` (`intent.media.snapshot`), a JPEG. */
+export function mediaSnapshot(of: string, jpeg: Uint8Array): MediaSnapshotMessage {
+  let binary = "";
+  for (let i = 0; i < jpeg.length; i += 0x8000) binary += String.fromCharCode(...jpeg.subarray(i, i + 0x8000));
+  const encoded = btoa(binary);
+  if (encoded.length === 0 || encoded.length > MAX_SNAPSHOT) {
+    throw new ProtocolError(`media.snapshot: a still picture holds 1 to ${MAX_SNAPSHOT} characters in base64`);
+  }
+  return envelope("media.snapshot", { of, jpeg: encoded });
+}
+
 function softwareVersion(version: unknown, where: string): string {
   if (typeof version !== "string" || version.length === 0 || version.length > MAX_SOFTWARE) {
     throw new ProtocolError(`${where} must be 1 to ${MAX_SOFTWARE} characters`);
@@ -135,6 +154,11 @@ export interface Welcome {
   readonly deviceId: string;
   readonly room: string;
   readonly capabilities: ReadonlySet<string>;
+  /**
+   * The core talks with the device: a device allowed audio offers its voice (A1). Without, its audio
+   * only serves the calls a person opens. `true` when the core does not say.
+   */
+  readonly voice: boolean;
 }
 
 export interface BehaviorIntent {
@@ -175,7 +199,38 @@ export interface UpdateIntent {
   readonly version: string;
 }
 
-export type Intent = BehaviorIntent | ExpressionIntent | BeatIntent | IdentifyIntent | TextIntent | UpdateIntent;
+/**
+ * A person opened a session: connect for it at once, with the camera's video when `video`, the
+ * microphone and the speaker both ways when `audio` (a call), for `maxS` seconds at most (M1, M2).
+ */
+export interface MediaOpenIntent {
+  readonly type: "intent.media.open";
+  readonly session: string;
+  readonly video: boolean;
+  readonly audio: boolean;
+  readonly maxS: number;
+}
+
+/** End the session `session` now (M2). */
+export interface MediaCloseIntent {
+  readonly type: "intent.media.close";
+  readonly session: string;
+}
+
+/** Take a still picture now and send it (`media.snapshot`, of this intent's id). Needs `video.capture`. */
+export interface SnapshotIntent {
+  readonly type: "intent.media.snapshot";
+}
+
+export type MediaIntent = MediaOpenIntent | MediaCloseIntent | SnapshotIntent;
+export type Intent =
+  | BehaviorIntent
+  | ExpressionIntent
+  | BeatIntent
+  | IdentifyIntent
+  | TextIntent
+  | UpdateIntent
+  | MediaIntent;
 export type CoreMessage = Welcome | Intent;
 
 export interface Received {
@@ -203,15 +258,17 @@ export function parse(data: unknown): Received {
 function read(type: string, payload: Record<string, unknown>): CoreMessage | null {
   switch (type) {
     case "welcome": {
-      exactKeys(payload, ["device_id", "room", "capabilities"], ["device_id", "room", "capabilities"], type);
-      const { device_id, room, capabilities } = payload;
+      exactKeys(payload, ["device_id", "room", "capabilities", "voice"], ["device_id", "room", "capabilities"], type);
+      const { device_id, room, capabilities, voice } = payload;
       if (typeof device_id !== "string" || typeof room !== "string") {
         throw new ProtocolError("welcome: device_id and room must be strings");
       }
       if (!Array.isArray(capabilities) || !capabilities.every((c) => typeof c === "string")) {
         throw new ProtocolError("welcome: capabilities must be a list of strings");
       }
-      return { type, deviceId: device_id, room, capabilities: new Set(capabilities) };
+      if (voice !== undefined && typeof voice !== "boolean")
+        throw new ProtocolError("welcome: voice must be a boolean");
+      return { type, deviceId: device_id, room, capabilities: new Set(capabilities), voice: voice ?? true };
     }
     case "intent.behavior": {
       exactKeys(payload, ["behavior"], ["behavior"], type);
@@ -235,8 +292,23 @@ function read(type: string, payload: Record<string, unknown>): CoreMessage | nul
     case "intent.update":
       exactKeys(payload, ["version"], ["version"], type);
       return { type, version: softwareVersion(payload.version, `${type}.version`) };
+    case "intent.media.open": {
+      exactKeys(payload, ["session", "video", "audio", "max_s"], ["session", "video", "audio", "max_s"], type);
+      const { video, audio, max_s } = payload;
+      if (typeof video !== "boolean" || typeof audio !== "boolean") {
+        throw new ProtocolError(`${type}: video and audio must be booleans`);
+      }
+      if (typeof max_s !== "number" || !Number.isInteger(max_s) || max_s < 1 || max_s > MAX_SESSION_S) {
+        throw new ProtocolError(`${type}.max_s must be an integer from 1 to ${MAX_SESSION_S}`);
+      }
+      return { type, session: session(payload.session, type), video, audio, maxS: max_s };
+    }
+    case "intent.media.close":
+      exactKeys(payload, ["session"], ["session"], type);
+      return { type, session: session(payload.session, type) };
     case "intent.beat":
     case "intent.identify":
+    case "intent.media.snapshot":
       exactKeys(payload, [], [], type);
       return { type };
     default:
@@ -244,11 +316,21 @@ function read(type: string, payload: Record<string, unknown>): CoreMessage | nul
   }
 }
 
-/** The core's answer to an audio offer (`POST /satellites/{device_id}/audio`); other fields are ignored. */
-export function parseAudioAnswer(data: unknown): { readonly sdp: string; readonly type: "answer" } {
-  const body = record(data, "audio answer");
+function session(value: unknown, where: string): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_ID) {
+    throw new ProtocolError(`${where}.session must be 1 to ${MAX_ID} characters`);
+  }
+  return value;
+}
+
+/**
+ * The core's answer to an offer (`POST /satellites/{device_id}/audio` or `/media`); other fields
+ * are ignored.
+ */
+export function parseAnswer(data: unknown, where = "audio answer"): { readonly sdp: string; readonly type: "answer" } {
+  const body = record(data, where);
   if (typeof body.sdp !== "string" || body.type !== "answer") {
-    throw new ProtocolError("audio answer: the core did not answer with an SDP answer");
+    throw new ProtocolError(`${where}: the core did not answer with an SDP answer`);
   }
   return { sdp: body.sdp, type: "answer" };
 }
