@@ -107,8 +107,9 @@ test/             behaviour tests against a fake core (local HTTP and WebSocket,
 
 The suite is the published server's `nestor satellites conformance` command, run through `uvx`; the
 server's version is pinned in `.nestor-version`, the one place to bump it (deliberately, after
-reading the server's changelog). `pnpm conformance` builds, then runs `test/conformance.test.ts`,
-which checks the exit status (0), that no line starts with `FAIL`, and a few named checks. By hand:
+reading the server's changelog). `pnpm conformance` builds, then runs `test/conformance/`, one file
+per satellite (CI runs each in its own job), which checks the exit status (0), that no line starts
+with `FAIL`, and a few named checks. By hand:
 
 ```bash
 pnpm build
