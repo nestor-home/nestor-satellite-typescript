@@ -1,4 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>nestor-home/.github"]
+  "extends": ["github>nestor-home/.github"],
+  "packageRules": [
+    {
+      "description": "CI tests every Node major `engines` covers, the oldest included: those entries move with `engines`, by hand.",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [".github/workflows/ci.yml"],
+      "matchDepNames": ["node"],
+      "enabled": false
+    },
+    {
+      "description": "Node's types stay on the oldest major `engines` covers, so the code uses no newer API.",
+      "matchPackageNames": ["@types/node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ]
 }

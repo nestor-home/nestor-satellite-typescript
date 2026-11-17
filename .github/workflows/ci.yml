@@ -13,9 +13,11 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     strategy:
       matrix:
-        node: ["22", "24"]
+        # every Node major `engines` covers that is still maintained
+        node: ["22", "24", "26"]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -35,6 +37,7 @@ jobs:
     # per satellite, side by side; Chromium comes from the cache once warm.
     name: conformance (${{ matrix.satellite }})
     runs-on: ubuntu-latest
+    timeout-minutes: 6
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +72,7 @@ jobs:
     needs: [check, conformance]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
