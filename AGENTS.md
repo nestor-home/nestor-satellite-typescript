@@ -6,15 +6,16 @@ Node. This file is for coding agents: read it before changing anything.
 ## Commands
 
 ```bash
-pnpm install
-pnpm lint && pnpm typecheck && pnpm test   # all three must pass; CI runs them on Node 22 and 24
+pnpm install                                # also installs the pre-push hook (lefthook.yml: Biome, typecheck)
+pnpm lint && pnpm typecheck && pnpm test   # all three must pass; CI runs them on Node 22, 24 and 26
 pnpm package:check                          # build, publint, attw
 pnpm conformance                            # build, then the published server's suite (needs uvx)
 NESTOR_CONFORMANCE_FROM='../nestor[voice,media]' pnpm conformance   # the same against a local server
 pnpm format                                 # Biome writes the fixes
 ```
 
-Dependencies are pinned to exact versions (`pnpm add -E`); commit `pnpm-lock.yaml`.
+Dependencies are pinned to exact versions (`pnpm add -E`); commit `pnpm-lock.yaml`. Test files run in a
+random order (the seed is printed; `pnpm test --sequence.seed=<seed>` replays one).
 
 ## Layout
 

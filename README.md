@@ -91,7 +91,7 @@ The recorded voice that says device codes is shared under CC BY 4.0: see
 ## Development
 
 ```bash
-pnpm install
+pnpm install       # also installs a pre-push hook (lefthook): Biome and the typecheck
 pnpm lint && pnpm typecheck && pnpm test
 pnpm conformance   # the published server's conformance suite (uvx; version in .nestor-version)
 ```

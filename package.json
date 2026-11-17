@@ -59,6 +59,7 @@
     "voice"
   ],
   "scripts": {
+    "prepare": "lefthook install",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/node/bin.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "biome check .",
@@ -88,6 +89,7 @@
     "@types/ws": "8.18.2",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
+    "lefthook": "2.2.2",
     "playwright-core": "1.65.1",
     "publint": "0.3.25",
     "typescript": "7.0.2",
