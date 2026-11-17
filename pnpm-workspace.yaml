@@ -1,0 +1,3 @@
+# lefthook installs the hook through the "prepare" script, not its own postinstall.
+allowBuilds:
+  lefthook: false
