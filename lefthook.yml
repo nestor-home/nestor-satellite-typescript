@@ -1,5 +1,8 @@
 # Before a push: Biome (format and lint) on the pushed files, then the typecheck.
 # `pnpm install` installs the hook (the "prepare" script).
+# No Git LFS here: without this, lefthook runs `git lfs pre-push`, which talks to the remote (seconds).
+skip_lfs: true
+
 pre-push:
   parallel: true
   jobs:
