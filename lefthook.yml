@@ -7,7 +7,6 @@ pre-push:
   parallel: true
   jobs:
     - name: biome
-      glob: "*.{js,mjs,cjs,ts,mts,cts,json,jsonc,css}"
       run: pnpm exec biome check --no-errors-on-unmatched --files-ignore-unknown=true {push_files}
     - name: typecheck
       glob: "*.{ts,mts,cts}"
