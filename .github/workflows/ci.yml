@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # uvx installs the core in seconds; restoring and saving its cache cost more than they saved.
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           enable-cache: false
       - uses: pnpm/action-setup@v6
